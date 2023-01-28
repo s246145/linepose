@@ -55,7 +55,7 @@ def intersect(box_a, box_b):
                        box_b[:, :2].unsqueeze(0).expand(A, B, 2))
     inter = torch.clamp((max_xy - min_xy), min=0)
     return inter[:, :, 0] * inter[:, :, 1]
-
+    #A:A/(AUB) B:B/AUB
 
 def jaccard(box_a, box_b):
     """Compute the jaccard overlap of two sets of boxes.  The jaccard overlap
@@ -69,16 +69,17 @@ def jaccard(box_a, box_b):
     Return:
         jaccard overlap: (tensor) Shape: [box_a.size(0), box_b.size(0)]
     """
-    inter = intersect(box_a, box_b)
+    inter = intersect(box_a, box_b) #AとBのかぶっている領域
     area_a = ((box_a[:, 2]-box_a[:, 0]) *
               (box_a[:, 3]-box_a[:, 1])).unsqueeze(1).expand_as(inter)  # [A,B]
     area_b = ((box_b[:, 2]-box_b[:, 0]) *
               (box_b[:, 3]-box_b[:, 1])).unsqueeze(0).expand_as(inter)  # [A,B]
-    union = area_a + area_b - inter
+    union = area_a + area_b - inter #IoU率
     return inter / union  # [A,B]
+    #A:A/(AUB) B:B/AUB
 
 
-def match(threshold, truths, priors, variances, labels, loc_t, conf_t, idx):
+def match(threshold, truths, priors, variances, labels, poses,loc_t, conf_t, pose_t,idx):
     """Match each prior box with the ground truth box of the highest jaccard
     overlap, encode the bounding boxes, then return the matched indices
     corresponding to both confidence and location preds.
@@ -89,22 +90,34 @@ def match(threshold, truths, priors, variances, labels, loc_t, conf_t, idx):
         variances: (tensor) Variances corresponding to each prior coord,
             Shape: [num_priors, 4].
         labels: (tensor) All the class labels for the image, Shape: [num_obj].
+        poses:(tensor)正解ポーズ
         loc_t: (tensor) Tensor to be filled w/ endcoded location targets.
         conf_t: (tensor) Tensor to be filled w/ matched indices for conf preds.
+        pose_t:ポーズの正解データ
         idx: (int) current batch index
     Return:
         The matched indices corresponding to 1)location and 2)confidence preds.
     """
+    
     # jaccard index
     overlaps = jaccard(
         truths,
         point_form(priors)
-    )
+    )#truth 正解ボックス　point_form(priors) 8732のデフォルトボックス座標
+    #jaccardで重なりを計算
+    #戻り値　重なり率
+    
     # (Bipartite Matching)
     # [1,num_objects] best prior for each ground truth
     best_prior_overlap, best_prior_idx = overlaps.max(1, keepdim=True)
+    
+    #best_prior_overlap:最も重なり率が高い正解ボックス
+    #best_prior_overlap:最も重なり率が高いデフォルトボックス
+    
     # [1,num_priors] best ground truth for each prior
+    
     best_truth_overlap, best_truth_idx = overlaps.max(0, keepdim=True)
+    
     best_truth_idx.squeeze_(0)
     best_truth_overlap.squeeze_(0)
     best_prior_idx.squeeze_(1)
@@ -115,11 +128,16 @@ def match(threshold, truths, priors, variances, labels, loc_t, conf_t, idx):
     for j in range(best_prior_idx.size(0)):
         best_truth_idx[best_prior_idx[j]] = j
     matches = truths[best_truth_idx]          # Shape: [num_priors,4]
-    conf = labels[best_truth_idx] + 1         # Shape: [num_priors]
+    conf = labels[best_truth_idx] + 1         # Shape: [num_priors]]
+    
+    poses = poses[best_truth_idx]    # Shape: [num_priors,3]
+    
     conf[best_truth_overlap < threshold] = 0  # label as background
+    
     loc = encode(matches, priors, variances)
     loc_t[idx] = loc    # [num_priors,4] encoded offsets to learn
     conf_t[idx] = conf  # [num_priors] top class label for each prior
+    pose_t[idx] = poses # [num_priors,3] top class label for each prior
 
 
 def encode(matched, priors, variances):
