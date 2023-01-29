@@ -39,18 +39,8 @@ from pytorch_metric_learning import miners, losses
 import utils.ssd_model
 import importlib
 importlib.reload(utils.ssd_model) #importと同じモジュールを指定する。
-
+import os
 from utils.ssd_model import make_datapath_list, VOCDataset, DataTransform, Anno_xml2list, od_collate_fn,MultiBoxLoss
-
-
-# In[ ]:
-
-
-
-
-
-# In[58]:
-
 
 # 乱数のシードを設定
 torch.manual_seed(1234)
@@ -61,19 +51,13 @@ random.seed(1234)
 # In[59]:
 
 
-import torch
-print(torch.__version__)
-
-
-# In[60]:
-
 
 # ファイルパスのリストを取得
-rootpath = "./data/"
+rootpath = "/home/s246145/lm/lm/"
 train_img_list, train_anno_list,train_pose_list,val_img_list, val_anno_list,val_pose_list = make_datapath_list(
     rootpath)
 
-
+print("ファイルパスリスト取得")
 # # DatasetとDataLoaderを作成する
 
 # In[61]:
@@ -92,20 +76,20 @@ train_dataset = VOCDataset(train_img_list, train_anno_list, phase="train", trans
 
 val_dataset = VOCDataset(val_img_list, val_anno_list, phase="val", transform=DataTransform(
    input_size, color_mean), transform_anno=Anno_xml2list(voc_classes),anno_pose_list=val_pose_list)
-
+print("dataset作成")
 
 # DataLoaderを作成する
-batch_size = 10
+batch_size = 4
 
 train_dataloader = data.DataLoader(
-    train_dataset, batch_size=batch_size, shuffle=True, collate_fn=od_collate_fn)
+    train_dataset, batch_size=batch_size, shuffle=True, num_workers=os.cpu_count(),collate_fn=od_collate_fn,pin_memory=True)
 
 val_dataloader = data.DataLoader(
-    val_dataset, batch_size=batch_size, shuffle=False, collate_fn=od_collate_fn)
+        val_dataset, batch_size=batch_size, shuffle=False, num_workers=os.cpu_count(),collate_fn=od_collate_fn,pin_memory=True)
 
 # 辞書オブジェクトにまとめる
 dataloaders_dict = {"train": train_dataloader, "val": val_dataloader}
-
+print("dataLoader作成")
 
 # # ネットワークモデルの作成する
 
@@ -190,8 +174,8 @@ optimizer = optim.SGD(net.parameters(), lr=1e-3,
 # In[65]:
 
 
-# モデルを学習させる関数を作成
-
+# モデルを学習
+print("学習開始")
 
 def train_model(net, dataloaders_dict, criterion, optimizer, num_epochs):
 
@@ -204,6 +188,8 @@ def train_model(net, dataloaders_dict, criterion, optimizer, num_epochs):
 
     # ネットワークがある程度固定であれば、高速化させる
     torch.backends.cudnn.benchmark = True
+    
+    #scaler = torch.cuda.amp.GradScaler()
 
     # イテレーションカウンタをセット
     iteration = 1
@@ -226,6 +212,7 @@ def train_model(net, dataloaders_dict, criterion, optimizer, num_epochs):
         for phase in ['train', 'val']:
             if phase == 'train':
                 net.train()  # モデルを訓練モードに
+                scaler = torch.cuda.amp.GradScaler()
                 print('（train）')
             else:
                 if((epoch+1) % 10 == 0):
@@ -248,34 +235,39 @@ def train_model(net, dataloaders_dict, criterion, optimizer, num_epochs):
                 optimizer.zero_grad()
 
                 # 順伝搬（forward）計算
-                with torch.set_grad_enabled(phase == 'train'):
+                #with torch.set_grad_enabled(phase == 'train'):
+                with torch.cuda.amp.autocast():
                     # 順伝搬（forward）計算
                     outputs = net(images)
 
                     # 損失の計算
-                    loss_l, loss_c ,loss_p,Ldesk= criterion(outputs, targets)
-                    loss = loss_l + loss_c + loss_p + Ldesk
-                    
+                    loss_l, loss_c ,loss_p,Ldesk,loss_t= criterion(outputs, targets)
+                    loss = loss_l + loss_c + loss_p + Ldesk + loss_t
+                    #loss_l, loss_c ,loss_p= criterion(outputs, targets)
+                    #loss = loss_l + loss_c + loss_p
                     # 訓練時はバックプロパゲーション
                     if phase == 'train':
                             
-                        loss.backward()  # 勾配の計算
-
+                        #loss.backward()  # 勾配の計算
+                        scaler.scale(loss).backward()
                         # 勾配が大きくなりすぎると計算が不安定になるので、clipで最大でも勾配2.0に留める
                         nn.utils.clip_grad_value_(
                             net.parameters(), clip_value=1.0)
 
-                        optimizer.step()  # パラメータ更新
-
+                        #optimizer.step()  # パラメータ更新
+                        scaler.step(optimizer)
                         if (iteration % 10 == 0):  # 10iterに1度、lossを表示
                             t_iter_finish = time.time()
                             duration = t_iter_finish - t_iter_start
-                            print('イテレーション {} || Loss: {:.4f} || 10iter: {:.4f} sec.'.format(
-                                iteration, loss.item(), duration))
+                            print('イテレーション {} || Loss: {:.4f} || 10iter: {:.4f} sec.||loss_l: {:.4f} ||loss_c: {:.4f}||loss_p: {:.4f}||Ldesk: {:.4f}||loss_t: {:.4f}'.format(
+                                iteration, loss.item(), duration,loss_l,loss_c,loss_p,Ldesk,loss_t))
+                            #print('イテレーション {} || Loss: {:.4f} || 10iter: {:.4f} sec.||loss_l: {:.4f} ||loss_c: {:.4f}||loss_p: {:.4f}.'.format(
+                            #iteration, loss.item(), duration,loss_l,loss_c,loss_p))
                             t_iter_start = time.time()
 
                         epoch_train_loss += loss.item()
                         iteration += 1
+                        scaler.update()
 
                     # 検証時
                     else:

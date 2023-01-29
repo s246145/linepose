@@ -1181,15 +1181,18 @@ class MultiBoxLoss(nn.Module):
         loss_func = losses.TripletMarginLoss(margin=0.2)#トリプレットロス
         
         loss_t = loss_func(line_p,conf_p,mine_t)#トリプレットロス
-        
+
         Ldesk = 0
         
         for (pos1,pos2) in zip(a1_l,p_l):
             ploss = ((line_p[pos1] - line_p[pos2])**2).sum()
             qloss = ((pose_t[pos1] - pose_t[pos2])**2).sum()
             Ldesk += (ploss - qloss)**2
+
+        Ldesk = (Ldesk / len(a1_l)) + (loss_t / (len(a1_l)+len(a2_l)))
+        Ldesk = Ldesk / len(a1_l)
+        Ldesk = Ldesk / 32
         
-        Ldesk = (Ldesk + loss_t) / N
         
-        
-        return loss_l,loss_c,loss_p,Ldesk
+        return loss_l,loss_c,loss_p,Ldesk,loss_t
+        #return loss_l,loss_c,loss_p
