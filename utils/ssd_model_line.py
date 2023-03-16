@@ -55,9 +55,9 @@ def make_datapath_list(rootpath):#rootpath = /home/s246145/tless
     pose_template = osp.join(rootpath, 'train_pbr'+'/%s'+'/scene_gt.json')
     
     # テスト画像ファイルとアノテーションファイルへのパスのテンプレートを作成
-    imgpath_template_t = osp.join(rootpath, 'test_primesense'+'/%s'+'/rgb'+'/%s.png')
-    coco_template_t = osp.join(rootpath, 'test_primesense'+'/%s'+'/scene_gt_coco_modal.json')
-    pose_template_t = osp.join(rootpath, 'test_primesense'+'/%s'+'/scene_gt.json')
+    imgpath_template_t = osp.join(rootpath, 'test'+'/%s'+'/rgb'+'/%s.png')
+    coco_template_t = osp.join(rootpath, 'test'+'/%s'+'/scene_gt_coco_modal.json')
+    pose_template_t = osp.join(rootpath, 'test'+'/%s'+'/scene_gt.json')
     
     # 訓練データの画像ファイルとアノテーションファイルへのパスリストを作成
     train_img_list = list()
@@ -83,9 +83,9 @@ def make_datapath_list(rootpath):#rootpath = /home/s246145/tless
     val_anno_list = list()
     val_pose_list = list()
     
-    for i in range(20):
-        anno_path = (coco_template_t % str(i+1).zfill(6))  # アノテーションのパス
-        pose_path = (pose_template_t % str(i+1).zfill(6))
+    for i in range(1):
+        anno_path = (coco_template_t % str(i+2).zfill(6))  # アノテーションのパス
+        pose_path = (pose_template_t % str(i+2).zfill(6))
         coco = COCO(anno_path)
         imageids = list(coco.imgToAnns.keys())#アノテーションデータから画像ID番号を取得
         
@@ -94,7 +94,7 @@ def make_datapath_list(rootpath):#rootpath = /home/s246145/tless
             val_pose_list.append(pose_path)
         
         for j in imageids:
-            img_path = (imgpath_template_t % ((str(i+1).zfill(6)),
+            img_path = (imgpath_template_t % ((str(i+2).zfill(6)),
                                             str(j).zfill(6)))  # 画像のパス
             
             val_img_list.append(img_path)  # リストに追加
@@ -197,11 +197,16 @@ class Anno_xml2list(object):
                     r = Rotation.from_matrix(l_name_n.reshape(3,3))
                     rv = r.as_quat()
                     p1,p2,p3,p4 = rv
-                    bndbox.append(p1)
-                    bndbox.append(p2)
-                    bndbox.append(p3)
-                    bndbox.append(p4)
-                    
+                    if p4 < 0:
+                    	bndbox.append(-p1)
+                    	bndbox.append(-p2)
+                    	bndbox.append(-p3)
+                    	bndbox.append(-p4)
+                    else:
+                    	bndbox.append(p1)
+                    	bndbox.append(p2)
+                    	bndbox.append(p3)
+                    	bndbox.append(p4)
                     break
                     
                 i += 1
@@ -218,7 +223,159 @@ class Anno_xml2list(object):
 
 # 入力画像の前処理をするクラス
 
+class Anno_xml2list_test(object):
+    """
+    1枚の画像に対する「XML形式のアノテーションデータ」を、画像サイズで規格化してからリスト形式に変換する。
 
+    Attributes
+    ----------
+    classes : リスト
+        VOCのクラス名を格納したリスト
+    """
+
+    def __init__(self, classes):
+
+        self.classes = classes
+
+    def __call__(self, anno_list, width, height, anno_pose_list,index):
+        """
+        1枚の画像に対する「XML形式のアノテーションデータ」を、画像サイズで規格化してからリスト形式に変換する。
+
+        Parameters
+        ----------
+        anno_list : str
+            画像のアノテーションファイルへのパス。
+        width : int
+            対象画像の幅。
+        height : int
+            対象画像の高さ。
+        anno_pose_list : str
+            画像のポーズ情報ファイルへのパス
+        index : int
+            画像ID番号
+        Returns
+        -------
+        ret : [[xmin, ymin, xmax, ymax, label_ind,pose1,pose2,pose3], ... ]
+            物体のアノテーションデータを格納したリスト。画像内に存在する物体数分のだけ要素を持つ。
+        """
+
+        # 画像内の全ての物体のアノテーションをこのリストに格納します
+        ret = []
+        
+        # アノテーションデータを読み込む
+        coco = COCO(anno_list)
+                
+        categoryids = list(coco.imgToAnns.keys())#画像中の写っている物体のカテゴリIDを取得
+              
+        anno_ids = coco.getAnnIds(categoryids[index % 200])
+        
+        annos = coco.loadAnns(anno_ids)#index番目のidのアノテーションデータを取得
+        j = 0 #画像中の物体のid
+        
+        with open(anno_pose_list) as f:
+            df = json.load(f)#ポーズのアノテーションを取得
+            
+        for anno in annos:#画像中の物体の数だけループ
+        	
+            
+            linds = []
+            bndbox = []
+            cat = coco.loadCats(anno['category_id'])[0]#画像内すべてのカテゴリーを取得
+                
+            #lindsにカテゴリーの名前を入力
+            
+            xmin, ymin, w, h = anno['bbox']#カテゴリーのbboxを取得
+            
+            xmax, ymax = xmin + w, ymin + h
+            
+            xmin /= width
+            xmax /= width
+            
+            ymin /= height
+            ymax /= height
+            
+            bndbox.append(xmin)
+            bndbox.append(ymin)
+            bndbox.append(xmax)
+            bndbox.append(ymax)
+            
+            bndbox.append(self.classes.index(cat['name']))
+            
+            
+            i = 0
+            for A in df.values():#画像の数だけループ
+                
+                l_name = [d["cam_R_m2c"] for d in A]#A番目の画像中の姿勢  
+                
+                if i == (index % 200): #画像の姿勢データがindex番目まで到達すれば、ポーズを代入
+                    
+                    l_name_n = np.array(l_name[j])
+                    r = Rotation.from_matrix(l_name_n.reshape(3,3))
+                    rv = r.as_quat()
+                    p1,p2,p3,p4 = rv
+                    if p4 < 0:
+                    	bndbox.append(-p1)
+                    	bndbox.append(-p2)
+                    	bndbox.append(-p3)
+                    	bndbox.append(-p4)
+                    else:
+                    	bndbox.append(p1)
+                    	bndbox.append(p2)
+                    	bndbox.append(p3)
+                    	bndbox.append(p4)
+                    
+                    break
+                    
+                i += 1
+            
+            j += 1
+            bndbox.append(anno['ignore'])
+            
+            # resに[xmin, ymin, xmax, ymax, label_ind, ポーズアノテーション]を足す
+            
+            ret += [bndbox]
+	
+        return np.array(ret,dtype='float32')  # [[xmin, ymin, xmax, ymax, label_ind], ... ]
+
+def qtoaxis(quat):
+	B = np.zeros(4)
+	A = []
+	C = []
+	x,y,z,w = quat
+	w = torch.acos(w)#cos@/2
+	if torch.sin(w) != 0:
+		x = x/torch.sin(w)
+		y = y/torch.sin(w)
+		z = z/torch.sin(w)
+	else:
+		x = 0
+		y = 0
+		z = 0
+	C.append(x)
+	A.append(y)
+	A.append(z)
+	A.append(w)
+	for i,q in enumerate(A):
+		B[i] = q
+	
+	return(torch.from_numpy(B))
+
+def axistoq(axis):
+	B = np.zeros(4)
+	A = []
+	x,y,z,w = axis
+	
+	x = x*torch.sin(w)
+	y = y*torch.sin(w)
+	z = z*torch.sin(w)
+	A.append(x)
+	A.append(y)
+	A.append(z)
+	A.append(torch.cos(w))
+	for i,q in enumerate(A):
+		B[i] = q
+	return(torch.from_numpy(B))
+	
 class DataTransform():
     """
     画像とアノテーションの前処理クラス。訓練と推論で異なる動作をする。
@@ -237,13 +394,12 @@ class DataTransform():
     def __init__(self, input_size, color_mean):
         self.data_transform = {
             'train': Compose([
-                ConvertFromInts(),  # intをfloat32に変換
-                ToAbsoluteCoords(),  # アノテーションデータの規格化を戻す
-                PhotometricDistort(),  # 画像の色調などをランダムに変化
-                #Expand(color_mean),  # 画像のキャンバスを広げる
-                #RandomSampleCrop(),  # 画像内の部分をランダムに抜き出す
-                #RandomMirror(),  # 画像を反転させる
-                ToPercentCoords(),  # アノテーションデータを0-1に規格化
+                ConvertFromInts(),  # intをfloat32に変換-
+                
+                
+                
+                
+                
                 Resize(input_size),  # 画像サイズをinput_size×input_sizeに変形
                 SubtractMeans(color_mean)  # BGRの色の平均値を引き算
             ]),
@@ -924,7 +1080,7 @@ class SSD(nn.Module):
             i = 0
             loc.append(l(x).permute(0, 2, 3, 1).contiguous())
             conf.append(c(x).permute(0, 2, 3, 1).contiguous())
-            pose.append(p(x).permute(0, 2, 3, 1).contiguous())
+            pose.append((p(x).permute(0, 2, 3, 1).contiguous()))
             #P = F.relu(F.BatchNorm2d(p(x)))
             #pose.append(P.permute(0, 2, 3, 1).contiguous())
             #pose_sources.append(P)
@@ -1012,7 +1168,12 @@ class MultiBoxLoss(nn.Module):
 
         # SSDモデルの出力がタプルになっているので、個々にばらす
         loc_data, conf_data, line_data,pose_data,dbox_list = predictions
-
+        
+        #loc_data = torch.nan_to_num(loc_data)
+        #conf_data = torch.nan_to_num(conf_data)
+        #line_data = torch.nan_to_num(line_data)
+        #pose_data = torch.nan_to_num(pose_data)
+        
         # 要素数を把握
         num_batch = loc_data.size(0)  # ミニバッチのサイズ
         num_dbox = loc_data.size(1)  # DBoxの数 = 8732
@@ -1057,7 +1218,7 @@ class MultiBoxLoss(nn.Module):
             match(self.jaccard_thresh, truths, dbox,
                   variance, labels,ignore,loc_t, conf_t_label,ignore_t,idx)
                   
-            match2(self.jaccard_thresh+0.4, truths, dbox,
+            match2(self.jaccard_thresh+0.2, truths, dbox,
                   variance, labels,poses, ignore,conf_pt_label, pose_t,ignore_pt,idx)
 
         # ----------
@@ -1264,7 +1425,28 @@ class MultiBoxLoss(nn.Module):
         anc_pose_t = pose_t[a13[:]]
         pos_pose_t = pose_t[p3[:]]
         neg_pose_t = pose_t[n3[:]]
+        #print(pose_p)
+        #同一種類の姿勢類似度を計算
+        #for i in range(len(anc_pose_t)):
+            #while True:
+                #a = math.degrees(2 * np.arccos(np.dot(anc_pose_t[i],random.choice(pos_pose_t))))
+                #b = math.degrees(2 * np.arccos(np.dot(anc_pose_t[i],random.choice(pos_pose_t))))
+                #idx1,idx2,a,b = randhoice(anc_pose_t[i],pos_pose_t)
+                #if a > b:
 
+                    #def ranchoice(anc_pose_t,pos_pose_t):
+                        #random.seed()
+                        #rand = random.choice(pos_pose_t)
+                        #idx1 = pose_pos_t.index(rand)
+                        #if torch.dot(anc_pose_t[idx1],anc_pose_t) < 0:
+                        #torch.dot(anc_pose_t[idx1],anc_pose_t)
+                        #a = math.degrees(torch.arccos(torch.dot(anc_pose_t[idx1],anc_pose_t)))
+                        #random.seed()
+                        #rand = random.choice(pos_pose_t)
+                        #idx2 = pose_pos_t.index(rand)
+                        #b = math.degrees(torch.arccos(torch.dot(anc_pose_t[idx2],anc_pose_t)))
+                        #random.seed(1234)
+                        #return(idx1,idx2,a,b)
         loss_t = 0.0
         #print(a13[0])
         for i in range(len(anc_line)):
@@ -1283,24 +1465,24 @@ class MultiBoxLoss(nn.Module):
             #if torch.dot(m,n) < 0:
                 #neg_pose_p[T] = -neg_pose_p[T]
             #T = T + 1
-        for i,name in enumerate(anc_pose_p):
-            if torch.dot(anc_pose_p[i],anc_pose_t[i]) < 0:
-                anc_pose_p[i] = -anc_pose_p[i]
-        for i,name in enumerate(pos_pose_p):
-            if torch.dot(pos_pose_p[i],pos_pose_t[i]) < 0:
-                pos_pose_p[i] = -pos_pose_p[i]
+        #for i,name in enumerate(anc_pose_p):
+            #if torch.dot(anc_pose_p[i],anc_pose_t[i]) < 0:
+                #anc_pose_p[i] = -anc_pose_p[i]
+        #for i,name in enumerate(pos_pose_p):
+            #if torch.dot(pos_pose_p[i],pos_pose_t[i]) < 0:
+                #pos_pose_p[i] = -pos_pose_p[i]
         #for i,name in enumerate(neg_pose_p):
             #if torch.dot(neg_pose_p[i],neg_pose_t[i]) < 0:
                 #neg_pose_p[i] = -neg_pose_p[i]
 
-        loss_p_a = ((anc_pose_p - anc_pose_t)**2).sum()
-        loss_p_p = ((pos_pose_p - pos_pose_t)**2).sum()
+        #loss_p_a = ((anc_pose_p - anc_pose_t)**2).sum()
+        #loss_p_p = ((pos_pose_p - pos_pose_t)**2).sum()
         #loss_p_n = ((neg_pose_p - neg_pose_t)**2).sum()
 
-        if len(a13)+len(p3) == 0:
-            loss_p = 0.0
-        else:
-            loss_p = (loss_p_a + loss_p_p) / (len(a13)+len(p3))
+        #if len(a13)+len(p3) == 0:
+            #loss_p = 0.0
+        #else:
+            #loss_p = (loss_p_a + loss_p_p) / (len(a13)+len(p3))
 
         ploss = anc_line - pos_line
         
@@ -1322,10 +1504,60 @@ class MultiBoxLoss(nn.Module):
             Ldesk = 0.0
         else:
             Ldesk = Ldesk / len(a13)
+        #print(anc_pose_p[0]
+        #print(anc_pose_p)
+        for i in range(len(anc_pose_p)):
+        	anc_pose_p[i] = axistoq(anc_pose_p[i])
+        	#pos_pose_p[i] = axistoq(pos_pose_p[i])
+        	#neg_pose_p[i] = axistoq(neg_pose_p[i])
+        #print(anc_pose_p[0])	
+        loss_p_a = ((anc_pose_p - anc_pose_t)**2).sum()
+        
+        #print(anc_pose_t)
+        #loss_p_p = ((pos_pose_p - pos_pose_t)**2).sum()
+        #loss_p_n = ((neg_pose_p - neg_pose_t)**2).sum()
 
-        loss_l = 0.0
-        loss_c = 0.0
+        #if len(a13)+len(p3)+len(n3) == 0:
+            #loss_p = 0.0
+        #else:
+            #loss_p = (loss_p_a + loss_p_p+loss_p_n) / (len(a13)+len(p3)+len(n3))
+        if len(a13) == 0:
+            loss_p = 0.0
+        else:
+            loss_p = loss_p_a / len(a13)
+
+        #loss_l = 0.0
+        #loss_c = 0.0
         #loss_p = 0.0
         #Ldesk = 0.0
+        
+        #if torch.isnan(loss_c.clone().detach()) == 1:
+        #    loss_c = 0.0
+            #print(loss_c)
+        #    print("nanを検出")
+        #if torch.isnan(loss_l.clone().detach()) == 1:
+        #    loss_l = 0.0
+            #print(loss_c)
+            #print("nanを検出")
+        #if torch.isnan(loss_p.clone().detach()) == 1:
+        #    loss_p = 0.0
+            #print(loss_c)
+            #print("nanを検出")
+        #if torch.isnan(Ldesk.clone().detach()) == 1:
+        #    Ldesk = 0.0
+            #print(loss_c)
+            #print("nanを検出")
+        #if torch.isnan(loss_t.clone().detach()) == 1:
+        #    loss_t = 0.0
+            #print(loss_c)
+            #print("nanを検出")
+        #x = torch.tensor([1], dtype=torch.float,requires_grad=True)
+        #TypeError: unsupported format string passed to Tensor.__format__
+        #loss_c = 0.0
+        #loss_l = 0.0
+        #loss_p = 0.0
+        #Ldesk = 0.0
+        #loss_t = 0.0
+        
         return loss_l,loss_c,loss_p,Ldesk,loss_t
         #return loss_l,loss_c,loss_p

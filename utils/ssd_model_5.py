@@ -55,9 +55,9 @@ def make_datapath_list(rootpath):#rootpath = /home/s246145/tless
     pose_template = osp.join(rootpath, 'train_pbr'+'/%s'+'/scene_gt.json')
     
     # テスト画像ファイルとアノテーションファイルへのパスのテンプレートを作成
-    imgpath_template_t = osp.join(rootpath, 'test_primesense'+'/%s'+'/rgb'+'/%s.png')
-    coco_template_t = osp.join(rootpath, 'test_primesense'+'/%s'+'/scene_gt_coco_modal.json')
-    pose_template_t = osp.join(rootpath, 'test_primesense'+'/%s'+'/scene_gt.json')
+    imgpath_template_t = osp.join(rootpath, 'test'+'/%s'+'/rgb'+'/%s.png')
+    coco_template_t = osp.join(rootpath, 'test'+'/%s'+'/scene_gt_coco_modal.json')
+    pose_template_t = osp.join(rootpath, 'test'+'/%s'+'/scene_gt.json')
     
     # 訓練データの画像ファイルとアノテーションファイルへのパスリストを作成
     train_img_list = list()
@@ -83,9 +83,9 @@ def make_datapath_list(rootpath):#rootpath = /home/s246145/tless
     val_anno_list = list()
     val_pose_list = list()
     
-    for i in range(20):
-        anno_path = (coco_template_t % str(i+1).zfill(6))  # アノテーションのパス
-        pose_path = (pose_template_t % str(i+1).zfill(6))
+    for i in range(1):
+        anno_path = (coco_template_t % str(i+2).zfill(6))  # アノテーションのパス
+        pose_path = (pose_template_t % str(i+2).zfill(6))
         coco = COCO(anno_path)
         imageids = list(coco.imgToAnns.keys())#アノテーションデータから画像ID番号を取得
         
@@ -94,7 +94,7 @@ def make_datapath_list(rootpath):#rootpath = /home/s246145/tless
             val_pose_list.append(pose_path)
         
         for j in imageids:
-            img_path = (imgpath_template_t % ((str(i+1).zfill(6)),
+            img_path = (imgpath_template_t % ((str(i+2).zfill(6)),
                                             str(j).zfill(6)))  # 画像のパス
             
             val_img_list.append(img_path)  # リストに追加
@@ -164,6 +164,122 @@ class Anno_xml2list(object):
             
             linds = []
             bndbox = []
+            #cat = coco.loadCats(anno['category_id'])[0]#画像内すべてのカテゴリーを取得
+                
+            #lindsにカテゴリーの名前を入力
+            
+            xmin, ymin, w, h = anno['bbox']#カテゴリーのbboxを取得
+            
+            xmax, ymax = xmin + w, ymin + h
+            
+            xmin /= width
+            xmax /= width
+            
+            ymin /= height
+            ymax /= height
+            
+            bndbox.append(xmin)
+            bndbox.append(ymin)
+            bndbox.append(xmax)
+            bndbox.append(ymax)
+            
+            #bndbox.append(self.classes.index(cat['name']))
+            bndbox.append(anno['category_id'])
+            
+            i = 0
+            for A in df.values():#画像の数だけループ
+                
+                l_name = [d["cam_R_m2c"] for d in A]#A番目の画像中の姿勢  
+                
+                if i == (index % 1000): #画像の姿勢データがindex番目まで到達すれば、ポーズを代入
+                    
+                    l_name_n = np.array(l_name[j])
+                    r = Rotation.from_matrix(l_name_n.reshape(3,3))
+                    rv = r.as_quat()
+                    p1,p2,p3,p4 = rv
+                    if p4 < 0:
+                    	bndbox.append(-p1)
+                    	bndbox.append(-p2)
+                    	bndbox.append(-p3)
+                    	bndbox.append(-p4)
+                    else:
+                    	bndbox.append(p1)
+                    	bndbox.append(p2)
+                    	bndbox.append(p3)
+                    	bndbox.append(p4)
+                    break
+                    
+                i += 1
+            
+            j += 1
+            bndbox.append(anno['ignore'])
+            
+            # resに[xmin, ymin, xmax, ymax, label_ind, ポーズアノテーション]を足す
+            
+            ret += [bndbox]
+	
+        return np.array(ret,dtype='float32')  # [[xmin, ymin, xmax, ymax, label_ind], ... ]
+
+
+# 入力画像の前処理をするクラス
+
+class Anno_xml2list_test(object):
+    """
+    1枚の画像に対する「XML形式のアノテーションデータ」を、画像サイズで規格化してからリスト形式に変換する。
+
+    Attributes
+    ----------
+    classes : リスト
+        VOCのクラス名を格納したリスト
+    """
+
+    def __init__(self, classes):
+
+        self.classes = classes
+
+    def __call__(self, anno_list, width, height, anno_pose_list,index):
+        """
+        1枚の画像に対する「XML形式のアノテーションデータ」を、画像サイズで規格化してからリスト形式に変換する。
+
+        Parameters
+        ----------
+        anno_list : str
+            画像のアノテーションファイルへのパス。
+        width : int
+            対象画像の幅。
+        height : int
+            対象画像の高さ。
+        anno_pose_list : str
+            画像のポーズ情報ファイルへのパス
+        index : int
+            画像ID番号
+        Returns
+        -------
+        ret : [[xmin, ymin, xmax, ymax, label_ind,pose1,pose2,pose3], ... ]
+            物体のアノテーションデータを格納したリスト。画像内に存在する物体数分のだけ要素を持つ。
+        """
+
+        # 画像内の全ての物体のアノテーションをこのリストに格納します
+        ret = []
+        
+        # アノテーションデータを読み込む
+        coco = COCO(anno_list)
+                
+        categoryids = list(coco.imgToAnns.keys())#画像中の写っている物体のカテゴリIDを取得
+              
+        anno_ids = coco.getAnnIds(categoryids[index % 200])
+        
+        annos = coco.loadAnns(anno_ids)#index番目のidのアノテーションデータを取得
+        j = 0 #画像中の物体のid
+        
+        with open(anno_pose_list) as f:
+            df = json.load(f)#ポーズのアノテーションを取得
+            
+        for anno in annos:#画像中の物体の数だけループ
+        	
+            
+            linds = []
+            bndbox = []
             cat = coco.loadCats(anno['category_id'])[0]#画像内すべてのカテゴリーを取得
                 
             #lindsにカテゴリーの名前を入力
@@ -191,16 +307,22 @@ class Anno_xml2list(object):
                 
                 l_name = [d["cam_R_m2c"] for d in A]#A番目の画像中の姿勢  
                 
-                if i == (index % 1000): #画像の姿勢データがindex番目まで到達すれば、ポーズを代入
+                if i == (index % 200): #画像の姿勢データがindex番目まで到達すれば、ポーズを代入
                     
                     l_name_n = np.array(l_name[j])
                     r = Rotation.from_matrix(l_name_n.reshape(3,3))
                     rv = r.as_quat()
                     p1,p2,p3,p4 = rv
-                    bndbox.append(p1)
-                    bndbox.append(p2)
-                    bndbox.append(p3)
-                    bndbox.append(p4)
+                    if p4 < 0:
+                    	bndbox.append(-p1)
+                    	bndbox.append(-p2)
+                    	bndbox.append(-p3)
+                    	bndbox.append(-p4)
+                    else:
+                    	bndbox.append(p1)
+                    	bndbox.append(p2)
+                    	bndbox.append(p3)
+                    	bndbox.append(p4)
                     
                     break
                     
@@ -215,10 +337,47 @@ class Anno_xml2list(object):
 	
         return np.array(ret,dtype='float32')  # [[xmin, ymin, xmax, ymax, label_ind], ... ]
 
+def qtoaxis(quat):
+	B = np.zeros(4)
+	A = []
+	C = []
+	x,y,z,w = quat
+	w = torch.acos(w)#cos@/2
+	if torch.sin(w) != 0:
+		x = x/torch.sin(w)
+		y = y/torch.sin(w)
+		z = z/torch.sin(w)
+	else:
+		x = 0
+		y = 0
+		z = 0
+	C.append(x)
+	A.append(y)
+	A.append(z)
+	A.append(w)
+	for i,q in enumerate(A):
+		B[i] = q
+	
+	return(torch.from_numpy(B))
 
-# 入力画像の前処理をするクラス
+def axistoq(axis):
+	B = np.zeros(4)
+	A = []
+	x,y,z,w = axis
+	s = torch.abs(torch.sin(2*w))
+	x = x*s
+	y = y*s
+	z = z*s
+	A.append(x)
+	A.append(y)
+	A.append(z)
+	A.append(torch.cos(2 * w))
+        
+	for i,q in enumerate(A):
+		B[i] = q
 
-
+	return(torch.from_numpy(B))
+	
 class DataTransform():
     """
     画像とアノテーションの前処理クラス。訓練と推論で異なる動作をする。
@@ -237,13 +396,12 @@ class DataTransform():
     def __init__(self, input_size, color_mean):
         self.data_transform = {
             'train': Compose([
-                ConvertFromInts(),  # intをfloat32に変換
-                ToAbsoluteCoords(),  # アノテーションデータの規格化を戻す
-                PhotometricDistort(),  # 画像の色調などをランダムに変化
-                #Expand(color_mean),  # 画像のキャンバスを広げる
-                #RandomSampleCrop(),  # 画像内の部分をランダムに抜き出す
-                #RandomMirror(),  # 画像を反転させる
-                ToPercentCoords(),  # アノテーションデータを0-1に規格化
+                ConvertFromInts(),  # intをfloat32に変換-
+                
+                
+                
+                
+                
                 Resize(input_size),  # 画像サイズをinput_size×input_sizeに変形
                 SubtractMeans(color_mean)  # BGRの色の平均値を引き算
             ]),
@@ -422,7 +580,7 @@ def make_extras():
 # デフォルトボックスに対する各クラスの確率を出力するconf_layersを作成
 
 
-def make_loc_conf(num_classes=21, bbox_aspect_num=[4, 6, 6, 6, 4, 4]):
+def make_loc_conf(num_classes=2, bbox_aspect_num=[4, 6, 6, 6, 4, 4]):
 
     loc_layers = []
     conf_layers = []
@@ -435,73 +593,74 @@ def make_loc_conf(num_classes=21, bbox_aspect_num=[4, 6, 6, 6, 4, 4]):
                              * 4, kernel_size=3, padding=1)]
     conf_layers += [nn.Conv2d(512, bbox_aspect_num[0]
                               * num_classes, kernel_size=3, padding=1)]
-    pose_layers += [nn.Conv2d(512,bbox_aspect_num[0]
-                             * 32, kernel_size=3, padding=1)]
-    line_layer_1 +=[nn.Conv2d(bbox_aspect_num[0] * 32,bbox_aspect_num[0]*4
-                             ,kernel_size=1, padding=0)]
-    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[0] * 4,bbox_aspect_num[0]*4
-                             ,kernel_size=1, padding=0)]
+    pose_layers += [nn.Conv2d(512,bbox_aspect_num[0]*256, kernel_size=3, padding=1)]
+    #line_layer_1 +=[nn.Conv2d(bbox_aspect_num[0] * 32,bbox_aspect_num[0]*4
+    #                         ,kernel_size=1, padding=0)]
+    #line_layer_2 +=[nn.Conv2d(bbox_aspect_num[0] * 4,bbox_aspect_num[0]*4
+    #                         ,kernel_size=1, padding=0)]
 
     # VGGの最終層（source2）に対する畳み込み層
     loc_layers += [nn.Conv2d(1024, bbox_aspect_num[1]
                              * 4, kernel_size=3, padding=1)]
     conf_layers += [nn.Conv2d(1024, bbox_aspect_num[1]
                               * num_classes, kernel_size=3, padding=1)]
-    pose_layers += [nn.Conv2d(1024,bbox_aspect_num[1]
-                             * 32, kernel_size=3, padding=1)]
-    line_layer_1 +=[nn.Conv2d(bbox_aspect_num[1] * 32,bbox_aspect_num[1]*4
-                             ,kernel_size=1, padding=0)]
-    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[1] * 4,bbox_aspect_num[1]*4
-                             ,kernel_size=1, padding=0)]
+    pose_layers += [nn.Conv2d(1024,bbox_aspect_num[1]*256
+                             , kernel_size=3, padding=1)]
+    #line_layer_1 +=[nn.Conv2d(bbox_aspect_num[1] * 32,bbox_aspect_num[1]*4
+    #                         ,kernel_size=1, padding=0)]
+    #line_layer_2 +=[nn.Conv2d(bbox_aspect_num[1] * 4,bbox_aspect_num[1]*4
+    #                         ,kernel_size=1, padding=0)]
     
     # extraの（source3）に対する畳み込み層
     loc_layers += [nn.Conv2d(512, bbox_aspect_num[2]
                              * 4, kernel_size=3, padding=1)]
     conf_layers += [nn.Conv2d(512, bbox_aspect_num[2]
                               * num_classes, kernel_size=3, padding=1)]
-    pose_layers += [nn.Conv2d(512,bbox_aspect_num[2]
-                             * 32, kernel_size=3, padding=1)]
-    line_layer_1 +=[nn.Conv2d(bbox_aspect_num[2] * 32,bbox_aspect_num[2]*4
-                             ,kernel_size=1, padding=0)]
-    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[2] * 4,bbox_aspect_num[2]*4
-                             ,kernel_size=1, padding=0)]
+    pose_layers += [nn.Conv2d(512,bbox_aspect_num[2]*256
+                             , kernel_size=3, padding=1)]
+    #line_layer_1 +=[nn.Conv2d(bbox_aspect_num[2] * 32,bbox_aspect_num[2]*4
+    #                         ,kernel_size=1, padding=0)]
+    #line_layer_2 +=[nn.Conv2d(bbox_aspect_num[2] * 4,bbox_aspect_num[2]*4
+    #                         ,kernel_size=1, padding=0)]
     
     # extraの（source4）に対する畳み込み層
     loc_layers += [nn.Conv2d(256, bbox_aspect_num[3]
                              * 4, kernel_size=3, padding=1)]
     conf_layers += [nn.Conv2d(256, bbox_aspect_num[3]
-                              * num_classes, kernel_size=3, padding=1)]
-    pose_layers += [nn.Conv2d(256,bbox_aspect_num[3]
-                             * 32, kernel_size=3, padding=1)]
-    line_layer_1 +=[nn.Conv2d(bbox_aspect_num[3] * 32,bbox_aspect_num[3]*4
-                             ,kernel_size=1, padding=0)]
-    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[3] * 4,bbox_aspect_num[3]*4
-                             ,kernel_size=1, padding=0)]
+                             * num_classes, kernel_size=3, padding=1)]
+    pose_layers += [nn.Conv2d(256,bbox_aspect_num[3] * 256
+                            , kernel_size=3, padding=1)]
+    #line_layer_1 +=[nn.Conv2d(bbox_aspect_num[3] * 32,bbox_aspect_num[3]*4
+                             #,kernel_size=1, padding=0)]
+    #line_layer_2 +=[nn.Conv2d(bbox_aspect_num[3] * 4,bbox_aspect_num[3]*4
+                             #,kernel_size=1, padding=0)]
 
     # extraの（source5）に対する畳み込み層
     loc_layers += [nn.Conv2d(256, bbox_aspect_num[4]
                              * 4, kernel_size=3, padding=1)]
     conf_layers += [nn.Conv2d(256, bbox_aspect_num[4]
                               * num_classes, kernel_size=3, padding=1)]
-    pose_layers += [nn.Conv2d(256,bbox_aspect_num[4]
-                             * 32, kernel_size=3, padding=1)]
-    line_layer_1 +=[nn.Conv2d(bbox_aspect_num[4] * 32,bbox_aspect_num[4]*4
-                             ,kernel_size=1, padding=0)]
-    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[4] * 4,bbox_aspect_num[4]*4
-                             ,kernel_size=1, padding=0)]
+    pose_layers += [nn.Conv2d(256,bbox_aspect_num[4] * 256,
+                            kernel_size=3, padding=1)]
+    #line_layer_1 +=[nn.Conv2d(bbox_aspect_num[4] * 32,bbox_aspect_num[4]*4
+                             #,kernel_size=1, padding=0)]
+    #line_layer_2 +=[nn.Conv2d(bbox_aspect_num[4] * 4,bbox_aspect_num[4]*4
+                             #,kernel_size=1, padding=0)]
 
     # extraの（source6）に対する畳み込み層
     loc_layers += [nn.Conv2d(256, bbox_aspect_num[5]
                              * 4, kernel_size=3, padding=1)]
     conf_layers += [nn.Conv2d(256, bbox_aspect_num[5]
                               * num_classes, kernel_size=3, padding=1)]
-    pose_layers += [nn.Conv2d(256,bbox_aspect_num[5]
-                             * 32, kernel_size=3, padding=1)]
-    line_layer_1 +=[nn.Conv2d(bbox_aspect_num[5] * 32,bbox_aspect_num[5]*4
-                             ,kernel_size=1, padding=0)]
-    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[5] * 4,bbox_aspect_num[5]*4
-                             ,kernel_size=1, padding=0)]
-    
+    pose_layers += [nn.Conv2d(256,bbox_aspect_num[5] * 256
+                              , kernel_size=3, padding=1)]
+    #line_layer_1 +=[nn.Conv2d(bbox_aspect_num[5] * 32,bbox_aspect_num[5]*4
+    #                         ,kernel_size=1, padding=0)]
+    #line_layer_2 +=[nn.Conv2d(bbox_aspect_num[5] * 4,bbox_aspect_num[5]*4
+    #                         ,kernel_size=1, padding=0)]
+    line_layer_1 += [nn.Linear(256,32)]
+    line_layer_1 += [nn.Linear(32,4)]
+    line_layer_1 += [nn.Linear(4,4)]
     
     
     return nn.ModuleList(loc_layers), nn.ModuleList(conf_layers), nn.ModuleList(pose_layers),nn.ModuleList(line_layer_1),nn.ModuleList(line_layer_2)
@@ -804,11 +963,11 @@ class Detect():
             #conf_scores[21,8732]
             
             # posesのコピーを作成
-            decoded_poses = pose_list[i].clone()
+            #decoded_poses = pose_list[i].clone()
             # decoded_poses[32,8732]
             
             #linesのコピーを作成
-            decoded_lines = line_list[i].clone()
+            #decoded_lines = line_list[i].clone()
             # decoded_lines[3,8732]
             
             # 画像クラスごとのループ（背景クラスのindexである0は計算せず、index=1から）
@@ -833,10 +992,10 @@ class Detect():
                 l_mask = c_mask.unsqueeze(1).expand_as(decoded_boxes)
                 # l_mask:torch.Size([8732, 4])
                 
-                p_mask = c_mask.unsqueeze(1).expand_as(decoded_poses)
+                #p_mask = c_mask.unsqueeze(1).expand_as(decoded_poses)
                 # p_mask:torch.Size([8732,32])
                 
-                li_mask =c_mask.unsqueeze(1).expand_as(decoded_lines)
+                #li_mask =c_mask.unsqueeze(1).expand_as(decoded_lines)
                 # li_mask:torch.Size([8732,32])
                 
                 # l_maskをdecoded_boxesに適応します
@@ -844,9 +1003,9 @@ class Detect():
                 # decoded_boxes[l_mask]で1次元になってしまうので、
                 # viewで（閾値を超えたBBox数, 4）サイズに変形しなおす
                 
-                poses = decoded_poses[p_mask].view(-1,32)
+                #poses = decoded_poses[p_mask].view(-1,32)
                 
-                lines = decoded_lines[li_mask].view(-1,4)
+                #lines = decoded_lines[li_mask].view(-1,4)
                 
                 # 3. Non-Maximum Suppressionを実施し、被っているBBoxを取り除く
                 ids, count = nm_suppression(
@@ -857,26 +1016,208 @@ class Detect():
                 # outputにNon-Maximum Suppressionを抜けた結果を格納
                 output[i, cl, :count] = torch.cat((scores[ids[:count]].unsqueeze(1),
                                                    boxes[ids[:count]],poses[ids[:count]],lines[ids[:count]]),1)
-                
-        return output  # torch.Size([1, 21, 200, 5+32+4])
+                #output[i, cl, :count] = torch.cat((scores[ids[:count]].unsqueeze(1),
+                #                                   boxes[ids[:count]],1))
+
+        return output  # torch.Size([1, 2, 200, 5+32+4])
 
 # SSDクラスを作成する
+def acos_safe(x, eps=1e-4):
 
+    sign = torch.sign(x)
+    slope = np.arccos(1-eps) / eps
+    return torch.where(abs(x) <= 1-eps,
+                    torch.acos(x),
+                    torch.acos(sign * (1 - eps)) - slope*sign*(abs(x) - 1 + eps))
+
+from torch import linalg
 
 class SSD(nn.Module):
 
-    def __init__(self, phase, cfg):
+    def __init__(self, phase, cfg,device='cuda:0'):
         super(SSD, self).__init__()
 
         self.phase = phase  # train or inferenceを指定
         self.num_classes = cfg["num_classes"]  # クラス数=21
-
+        self.device = device
         # SSDのネットワークを作る
         self.vgg = make_vgg()
         self.extras = make_extras()
         self.L2Norm = L2Norm()
-        self.loc, self.conf, self.pose, self.line_1,self.line_2= make_loc_conf(
-            cfg["num_classes"], cfg["bbox_aspect_num"])
+        self.loc, self.conf, self.line, self.line_1,self.line_2= make_loc_conf(
+            2, cfg["bbox_aspect_num"])
+        self.map = cfg["feature_maps"]
+        # DBox作成
+        dbox = DBox(cfg)
+        self.dbox_list = dbox.make_dbox_list()
+
+        # 推論時はクラス「Detect」を用意します
+        if phase == 'inference':
+            self.detect = Detect()
+
+    def forward(self, x,targets):
+        sources = list()  # locとconfとposeへの入力source1～6を格納
+        pose_sources = list() #lineへの入力pose_source1~6を格納
+        loc = list()  # locの出力を格納
+        conf = list()  # confの出力を格納
+        pose = list() # poseの出力を格納
+        line = list()
+            
+        # vggのconv4_3まで計算する
+        for k in range(23):
+            x = self.vgg[k](x)
+
+        # conv4_3の出力をL2Normに入力し、source1を作成、sourcesに追加
+        source1 = self.L2Norm(x) 
+        
+        #print(A(source1).size())
+        sources.append(source1)
+        
+        # vggを最後まで計算し、source2を作成、sourcesに追加
+        for k in range(23, len(self.vgg)):
+            x = self.vgg[k](x)
+        sources.append(x)
+
+        
+        # extrasのconvとReLUを計算
+        # source3～6を、sourcesに追加
+        for k, v in enumerate(self.extras):
+            x = F.relu(v(x), inplace=True)
+            if k % 2 == 1:  # conv→ReLU→cov→ReLUをしたらsourceに入れる
+                sources.append(x)
+        
+    
+        # source1～6に、それぞれ対応する畳み込みを1回ずつ適用する
+        # zipでforループの複数のリストの要素を取得
+        # source1～6まであるので、6回ループが回る
+
+        for (x, l,c,li) in zip(sources, self.loc, self.conf,self.line):
+            # Permuteは要素の順番を入れ替え
+            loc.append(l(x).permute(0, 2, 3, 1).contiguous())
+            conf.append(c(x).permute(0, 2, 3, 1).contiguous())
+            line.append(F.relu(li(x)).permute(0, 2, 3, 1).contiguous())
+            #pose.append((F.relu(p(x)).permute(0, 2, 3, 1).contiguous()))
+            
+            #print(c(x).size())
+            #P = F.relu(F.BatchNorm2d(p(x)))
+            #pose.append(P.permute(0, 2, 3, 1).contiguous())
+            #pose_sources.append(P)
+            #pose_sources.append(F.relu(p(x)))
+            # l(x)とc(x)で畳み込みを実行
+            # l(x)とc(x)の出力サイズは[batch_num, 4*アスペクト比の種類数, featuremapの高さ, featuremap幅]
+            # sourceによって、アスペクト比の種類数が異なり、面倒なので順番入れ替えて整える
+            # permuteで要素の順番を入れ替え、
+            # [minibatch数, featuremap数, featuremap数,4*アスペクト比の種類数]へ
+            # （注釈）
+            # torch.contiguous()はメモリ上で要素を連続的に配置し直す命令です。
+            # あとでview関数を使用します。
+            # このviewを行うためには、対象の変数がメモリ上で連続配置されている必要があります。
+            
+                
+        # さらにlocとconfの形を変形
+        # locのサイズは、torch.Size([batch_num, 34928])
+        # confのサイズはtorch.Size([batch_num, 183372])になる
+        loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
+        conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
+        line = torch.cat([o.view(o.size(0), -1) for o in line], 1) 
+        #line = torch.cat([o.view(o.size(0), -1) for o in line], 1)
+        
+        # さらにlocとconfの形を整える
+        # locのサイズは、torch.Size([batch_num, 8732, 4])
+        # confのサイズは、torch.Size([batch_num, 8732, 21])
+        loc = loc.view(loc.size(0), -1, 4)
+        conf = conf.view(conf.size(0), -1, 2)
+        line = line.view(line.size(0), -1, 256)
+        #print(pose_sources.size())
+        #line = line.view(loc.size(0), -1, 4)
+        num_batch = loc.size(0)  # ミニバッチのサイズ
+        num_dbox = loc.size(1)  # DBoxの数 = 8732
+        num_classes = conf.size(2)  # クラス数 = 16
+        #print(loc.size())
+        #print(conf.size())
+        conf_t_label = torch.LongTensor(num_batch, num_dbox).to(self.device,non_blocking=True)
+        conf_line_label = torch.LongTensor(num_batch, num_dbox).to(self.device,non_blocking=True)
+        loc_t = torch.Tensor(num_batch, num_dbox, 4).to(self.device,non_blocking=True)
+        pose_t = torch.Tensor(num_batch, num_dbox, 4).to(self.device,non_blocking=True)
+        ignore_t = torch.LongTensor(num_batch, num_dbox).to(self.device,non_blocking=True)
+        line_zeros = torch.zeros(num_batch,num_dbox,32).to(self.device,non_blocking=True)
+        pose_zeros = torch.zeros(num_batch,num_dbox,4).to(self.device,non_blocking=True)
+
+        for idx in range(num_batch):  # ミニバッチでループ
+            # targets : [num_batch, num_objs, 9]
+            # 現在のミニバッチの正解アノテーションのBBoxとラベルを取得
+            truths = targets[idx][:, 0:4].to(self.device,non_blocking=True)  # BBox
+            # ラベル [物体1のラベル, 物体2のラベル, …] 0始まりにするために-1
+            labels = (targets[idx][:, 4] - 1).to(self.device,non_blocking=True)
+            # ポーズ[物体1のポーズ、物体2のポーズ, ...]
+            poses =  targets[idx][:, 5:9].to(self.device,non_blocking=True)
+            # ignore[muzukasiibuttai]
+            ignore = targets[idx][:, 9].to(self.device,non_blocking=True)
+            # デフォルトボックスを新たな変数で用意
+            dbox = self.dbox_list.to(self.device,non_blocking=True)
+
+            # 関数matchを実行し、loc_tとconf_t_labelの内容を更新する
+            # （詳細）
+            # loc_t:各DBoxに一番近い正解のBBoxの位置情報が上書きされる
+            # conf_t_label：各DBoxに一番近いBBoxのラベルが上書きされる
+            # ただし、一番近いBBoxとのjaccard overlapが0.5より小さい場合は
+            # 正解BBoxのラベルconf_t_labelは背景クラスの0とする
+            variance = [0.1, 0.2]
+            # このvarianceはDBoxからBBoxに補正計算する際に使用する式の係数です
+
+            match(0.5, truths, dbox,
+                  variance, labels,poses,ignore,loc_t, conf_t_label,conf_line_label,pose_t,ignore_t,idx)
+
+        #print(dbox)
+        pos_mask = conf_t_label > 0 # torch.Size([num_batch, 8732])
+        
+        pos_idx = pos_mask.unsqueeze(pos_mask.dim()).expand_as(line).to(self.device,non_blocking=True)
+        
+        pose_p = line[pos_idx].view(-1, 256).to(self.device,non_blocking=True)
+        
+        line_p = self.line_1[0](pose_p).to(self.device,non_blocking=True)
+              
+        pose_p = F.relu(self.line_1[0](pose_p)).to(self.device,non_blocking=True)
+        
+        pose_p = F.relu(self.line_1[1](pose_p)).to(self.device,non_blocking=True)
+        pose_p = self.line_1[2](pose_p).to(self.device,non_blocking=True)
+        pos_idx = pos_mask.unsqueeze(pos_mask.dim()).expand_as(pose_zeros).to(self.device,non_blocking=True)
+         
+        pose_t = pose_t[pos_idx].view(-1, 4).to(self.device,non_blocking=True)
+        
+        pose_z = pose_p.clone()
+        pose_y = pose_p.clone()
+        
+        pose_z[0:,0] = pose_y[0:,0] * torch.sin(pose_p[0:,3])
+        pose_z[0:,1] = pose_y[0:,1] * torch.sin(pose_p[0:,3])
+        pose_z[0:,2] = pose_y[0:,2] * torch.sin(pose_p[0:,3])
+        pose_z[0:,3] = torch.cos(pose_p[0:,3]/2)
+        #print(conf.size()) 
+        output = (loc,loc_t, conf,conf_t_label,line_p,pose_z,pose_t,self.dbox_list)
+        #print(pose_t[0]) 
+        if self.phase == "inference":  # 推論時
+            # クラス「Detect」のforwardを実行
+            # 返り値のサイズは torch.Size([batch_num, 21, 200, 5])
+            return self.detect(output[0], output[1], output[2],output[3])
+
+        else:  # 学習時
+            return output
+            # 返り値は(loc, conf, dbox_list)のタプル
+
+class SSD_pre(nn.Module):
+
+    def __init__(self, phase, cfg,device='cuda:0'):
+        super(SSD, self).__init__()
+
+        self.phase = phase  # train or inferenceを指定
+        self.num_classes = cfg["num_classes"]  # クラス数=21
+        self.device = device
+        # SSDのネットワークを作る
+        self.vgg = make_vgg()
+        self.extras = make_extras()
+        self.L2Norm = L2Norm()
+        self.loc, self.conf, self.line, self.line_1,self.line_2= make_loc_conf(
+            2, cfg["bbox_aspect_num"])
         self.map = cfg["feature_maps"]
         # DBox作成
         dbox = DBox(cfg)
@@ -893,20 +1234,22 @@ class SSD(nn.Module):
         conf = list()  # confの出力を格納
         pose = list() # poseの出力を格納
         line = list()
-        
+
         # vggのconv4_3まで計算する
         for k in range(23):
             x = self.vgg[k](x)
 
         # conv4_3の出力をL2Normに入力し、source1を作成、sourcesに追加
         source1 = self.L2Norm(x)
+
+        #print(A(source1).size())
         sources.append(source1)
 
         # vggを最後まで計算し、source2を作成、sourcesに追加
         for k in range(23, len(self.vgg)):
             x = self.vgg[k](x)
-
         sources.append(x)
+
 
         # extrasのconvとReLUを計算
         # source3～6を、sourcesに追加
@@ -914,21 +1257,24 @@ class SSD(nn.Module):
             x = F.relu(v(x), inplace=True)
             if k % 2 == 1:  # conv→ReLU→cov→ReLUをしたらsourceに入れる
                 sources.append(x)
-        #source[]
-        
+
+
         # source1～6に、それぞれ対応する畳み込みを1回ずつ適用する
         # zipでforループの複数のリストの要素を取得
         # source1～6まであるので、6回ループが回る
-        for (x, l, c,p) in zip(sources, self.loc, self.conf,self.pose):
+
+        for (x, l,c,li) in zip(sources, self.loc, self.conf,self.line):
             # Permuteは要素の順番を入れ替え
-            i = 0
             loc.append(l(x).permute(0, 2, 3, 1).contiguous())
             conf.append(c(x).permute(0, 2, 3, 1).contiguous())
-            pose.append(p(x).permute(0, 2, 3, 1).contiguous())
+            line.append(F.relu(li(x)).permute(0, 2, 3, 1).contiguous())
+            #pose.append((F.relu(p(x)).permute(0, 2, 3, 1).contiguous()))
+
+            #print(c(x).size())
             #P = F.relu(F.BatchNorm2d(p(x)))
             #pose.append(P.permute(0, 2, 3, 1).contiguous())
             #pose_sources.append(P)
-            pose_sources.append(F.relu(p(x)))
+            #pose_sources.append(F.relu(p(x)))
             # l(x)とc(x)で畳み込みを実行
             # l(x)とc(x)の出力サイズは[batch_num, 4*アスペクト比の種類数, featuremapの高さ, featuremap幅]
             # sourceによって、アスペクト比の種類数が異なり、面倒なので順番入れ替えて整える
@@ -938,31 +1284,40 @@ class SSD(nn.Module):
             # torch.contiguous()はメモリ上で要素を連続的に配置し直す命令です。
             # あとでview関数を使用します。
             # このviewを行うためには、対象の変数がメモリ上で連続配置されている必要があります。
-            i = i + 1
-        for (ps,l1,l2) in zip(pose_sources,self.line_1,self.line_2):
-            y = list()
-            y = l1(ps)
-            line.append(l2(y).permute(0, 2, 3, 1).contiguous())
-                
+
+
         # さらにlocとconfの形を変形
         # locのサイズは、torch.Size([batch_num, 34928])
         # confのサイズはtorch.Size([batch_num, 183372])になる
         loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
         conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
-        pose = torch.cat([o.view(o.size(0), -1) for o in pose], 1) 
         line = torch.cat([o.view(o.size(0), -1) for o in line], 1)
-        
+        #line = torch.cat([o.view(o.size(0), -1) for o in line], 1)
+
         # さらにlocとconfの形を整える
         # locのサイズは、torch.Size([batch_num, 8732, 4])
         # confのサイズは、torch.Size([batch_num, 8732, 21])
+        # lineのサイズは、torch.Size([batch_num, 8732, 256])
         loc = loc.view(loc.size(0), -1, 4)
-        conf = conf.view(conf.size(0), -1, self.num_classes)
-        pose = pose.view(loc.size(0), -1, 32)
-        line = line.view(loc.size(0), -1, 4)
-        
-        # 最後に出力する
-        output = (loc, conf, pose, line, self.dbox_list)
+        conf = conf.view(conf.size(0), -1, 2)
+        line = line.view(line.size(0), -1, 256)
+        print(line[0].size())
+        for idx in range(line.size(0)):
 
+
+        pose = line.view(-1, 256).to(self.device,non_blocking=True)
+
+        line_p = self.line_1[0](pose_p).to(self.device,non_blocking=True)
+
+        pose_p = F.relu(self.line_1[0](pose_p)).to(self.device,non_blocking=True)
+
+        pose_p = F.relu(self.line_1[1](pose_p)).to(self.device,non_blocking=True)
+        pose_p = self.line_1[2](pose_p).to(self.device,non_blocking=True)
+        
+        pose_t = pose_t.view(-1, 4).to(self.device,non_blocking=True)
+
+        output = (loc,conf,line,pose,self.dbox_list)
+        #print(pose_t[0])
         if self.phase == "inference":  # 推論時
             # クラス「Detect」のforwardを実行
             # 返り値のサイズは torch.Size([batch_num, 21, 200, 5])
@@ -972,11 +1327,10 @@ class SSD(nn.Module):
             return output
             # 返り値は(loc, conf, dbox_list)のタプル
 
-
 class MultiBoxLoss(nn.Module):
     """SSDの損失関数のクラスです。"""
 
-    def __init__(self, jaccard_thresh=0.5, neg_pos=3, device='cpu'):
+    def __init__(self, jaccard_thresh=0.5, neg_pos=3, device='cuda:0'):
         super(MultiBoxLoss, self).__init__()
         self.jaccard_thresh = jaccard_thresh  # 0.5 関数matchのjaccard係数の閾値
         self.negpos_ratio = neg_pos  # 3:1 Hard Negative Miningの負と正の比率
@@ -1011,87 +1365,38 @@ class MultiBoxLoss(nn.Module):
         """
 
         # SSDモデルの出力がタプルになっているので、個々にばらす
-        loc_data, conf_data, line_data,pose_data,dbox_list = predictions
-
+        loc_data,loc_t,conf_data,conf_t_label,line_p,pose_p,pose_t,dbox_list = predictions
+         
         # 要素数を把握
         num_batch = loc_data.size(0)  # ミニバッチのサイズ
         num_dbox = loc_data.size(1)  # DBoxの数 = 8732
-        num_classes = conf_data.size(2)  # クラス数 = 21
+        num_classes = conf_data.size(2)  # クラス数 = 16
 
-        # 損失の計算に使用するものを格納する変数を作成
-        # conf_t_label：各DBoxに一番近い正解のBBoxのラベルを格納させる
-        # loc_t:各DBoxに一番近い正解のBBoxの位置情報を格納させる
-        # pose_t:各DBoxに一番近い正解のポーズを格納させる
-        conf_t_label = torch.LongTensor(num_batch, num_dbox).to(self.device,non_blocking=True)
-        conf_pt_label = torch.LongTensor(num_batch, num_dbox).to(self.device,non_blocking=True)
-        loc_t = torch.Tensor(num_batch, num_dbox, 4).to(self.device,non_blocking=True)
-        pose_t = torch.Tensor(num_batch, num_dbox, 4).to(self.device,non_blocking=True)
-        ignore_t = torch.LongTensor(num_batch, num_dbox).to(self.device,non_blocking=True)
-        ignore_pt = torch.LongTensor(num_batch, num_dbox).to(self.device,non_blocking=True)
-        
-
-        # loc_tとconf_t_labelに、
-        # DBoxと正解アノテーションtargetsをmatchさせた結果を上書きする
-        for idx in range(num_batch):  # ミニバッチでループ
-            # targets : [num_batch, num_objs, 9]
-            # 現在のミニバッチの正解アノテーションのBBoxとラベルを取得
-            truths = targets[idx][:, 0:4].to(self.device,non_blocking=True)  # BBox
-            # ラベル [物体1のラベル, 物体2のラベル, …]
-            labels = targets[idx][:, 4].to(self.device,non_blocking=True)
-            # ポーズ[物体1のポーズ、物体2のポーズ, ...]
-            poses =  targets[idx][:, 5:9].to(self.device,non_blocking=True)
-            # ignore[muzukasiibuttai]
-            ignore = targets[idx][:, 9].to(self.device,non_blocking=True)
-            # デフォルトボックスを新たな変数で用意
-            dbox = dbox_list.to(self.device,non_blocking=True)
-
-            # 関数matchを実行し、loc_tとconf_t_labelの内容を更新する
-            # （詳細）
-            # loc_t:各DBoxに一番近い正解のBBoxの位置情報が上書きされる
-            # conf_t_label：各DBoxに一番近いBBoxのラベルが上書きされる
-            # ただし、一番近いBBoxとのjaccard overlapが0.5より小さい場合は
-            # 正解BBoxのラベルconf_t_labelは背景クラスの0とする
-            variance = [0.1, 0.2]
-            # このvarianceはDBoxからBBoxに補正計算する際に使用する式の係数です
-            
-            match(self.jaccard_thresh, truths, dbox,
-                  variance, labels,ignore,loc_t, conf_t_label,ignore_t,idx)
-                  
-            match2(self.jaccard_thresh+0.4, truths, dbox,
-                  variance, labels,poses, ignore,conf_pt_label, pose_t,ignore_pt,idx)
-
+        #print(dbox)
         # ----------
         # 位置の損失：loss_lを計算
         # Smooth L1関数で損失を計算する。ただし、物体を発見したDBoxのオフセットのみを計算する
         # ----------
         # 物体を検出したBBoxを取り出すマスクを作成
-
+        #print(labels)
         pos_mask = conf_t_label > 0 # torch.Size([num_batch, 8732])
-        pos_mask_1 = conf_pt_label > 0 
-        ig_mask  = ignore_t < 1
-        ig_mask_1 = ignore_pt < 1
-
-        #print(pos_mask)
-        #print(pos_mask_1)
-        #ignoredata wo toridasu
-        ig_mask = ig_mask[pos_mask]
-        ig_mask_1 = ig_mask_1[pos_mask_1]
-
-        # pos_maskをloc_dataのサイズに変形
-        pos_idx = pos_mask.unsqueeze(pos_mask.dim()).expand_as(loc_data)
-	
-        # Positive DBoxのloc_dataと、教師データloc_tを取得
-        loc_p = loc_data[pos_idx].view(-1, 4)
-        loc_t = loc_t[pos_idx].view(-1, 4)
         
+        pos_idx = pos_mask.unsqueeze(pos_mask.dim()).expand_as(loc_data).to(self.device,non_blocking=True)
+        #print(pos_idx.size())
+        #print(pos_idx)
+        # Positive DBoxのloc_dataと、教師データloc_tを取得
+        loc_p = loc_data[pos_idx].view(-1, 4).to(self.device,non_blocking=True)
+        loc_t = loc_t[pos_idx].view(-1, 4).to(self.device,non_blocking=True)
+        #print(loc_p.size())
+
         #ig_idx = ig_mask.unsqueeze(ig_mask.dim()).expand_as(loc_p)
         
         #ignorekarakyousidata wosyutoku
-        #loc_p = loc_p[ig_mask].view(-1,4)
-        #loc_t = loc_t[ig_mask].view(-1,4)
+        #loc_p = loc_p[pos_mask].view(-1,4)
+        #loc_t = loc_t[pos_mask].view(-1,4)
         
         # 物体を発見したPositive DBoxのオフセット情報loc_tの損失（誤差）を計算
-        loss_l = F.smooth_l1_loss(loc_p, loc_t, reduction='sum')
+        loss_l = F.smooth_l1_loss(loc_p, loc_t, reduction='sum').to(self.device,non_blocking=True)
         
         # ----------
         # 姿勢の損失：loss_pを計算
@@ -1100,45 +1405,30 @@ class MultiBoxLoss(nn.Module):
         # 物体を検出したBBoxを取り出すマスクを作成
         
         # Positive DBoxのloc_dataと、教師データloc_tを取得
-        pos_idx = pos_mask_1.unsqueeze(pos_mask.dim()).expand_as(pose_data)
-                
-        pose_p = pose_data[pos_idx].view(-1, 4)
-        pose_t = pose_t[pos_idx].view(-1, 4)
 
-        ig_idx = ig_mask_1.unsqueeze(ig_mask_1.dim()).expand_as(pose_p)
-        #print(pose_p.dtype)
-        #print(pose_t.dtype)
-        #print(ig_idx.dtype)
-        pose_p = pose_p[ig_idx].view(-1, 4)
-        pose_t = pose_t[ig_idx].view(-1, 4)
-        
-
-        #loss_p = ((pose_p - pose_t)**2).sum()
-        
         # ----------
         # 種類を出力
         # 記述子を出力
-        # ポーズを出力
         # 
         # ----------
         # 物体を検出したBBoxを取り出すマスクを作成
         
         # Positive DBoxのloc_dataを取
-        conf_p = conf_t_label[pos_mask].view(-1,1)
-        #conf_pt = conf_pt_label[pos_mask_1].view(-1,1)
-        
+        #conf_p = conf_t_label[pos_mask].view(-1,1)
+    
         # ----------
         # クラス予測の損失：loss_cを計算  
         # 交差エントロピー誤差関数で損失を計算する。ただし、背景クラスが正解であるDBoxが圧倒的に多いので、
         # Hard Negative Miningを実施し、物体発見DBoxと背景クラスDBoxの比が1:3になるようにする。
         # そこで背景クラスDBoxと予想したもののうち、損失が小さいものは、クラス予測の損失から除く
         # ----------
-        batch_conf = conf_data.view(-1, num_classes)
-
+        batch_conf = conf_data.view(-1, 2)
+        conf_l_label = conf_t_label.clone()
+        conf_l_label[pos_mask] = 1
         # クラス予測の損失を関数を計算(reduction='none'にして、和をとらず、次元をつぶさない)
         loss_c = F.cross_entropy(
-            batch_conf, conf_t_label.view(-1), reduction='none')
-
+            batch_conf, conf_l_label.view(-1), reduction='none')
+        
         # -----------------
         # これからNegative DBoxのうち、Hard Negative Miningで抽出するものを求めるマスクを作成します
         # -----------------
@@ -1148,7 +1438,9 @@ class MultiBoxLoss(nn.Module):
         num_pos = pos_mask.long().sum(1, keepdim=True)  # ミニバッチごとの物体クラス予測の数
         #num_pos_1 = pos_mask_1.long().sum(1, keepdim=True)
         loss_c = loss_c.view(num_batch, -1)  # torch.Size([num_batch, 8732])
+        #ig_idx = ig_mask.unsqueeze(ig_mask.dim()).expand_as(loss_c)
         loss_c[pos_mask] = 0  # 物体を発見したDBoxは損失0とする
+        #loss_c[pos_idx] = 0
 
         # Hard Negative Miningを実施する
         # 各DBoxの損失の大きさloss_cの順位であるidx_rankを求める
@@ -1193,139 +1485,89 @@ class MultiBoxLoss(nn.Module):
         # pos_mask：torch.Size([num_batch, 8732])→pos_idx_mask：torch.Size([num_batch, 8732, 21])
         pos_idx_mask = pos_mask.unsqueeze(2).expand_as(conf_data)
         neg_idx_mask = neg_mask.unsqueeze(2).expand_as(conf_data)
+        #print(pos_idx_mask.size())
+        ##pos_idx_maskはそのままでOK
 
         # conf_dataからposとnegだけを取り出してconf_hnmにする。形はtorch.Size([num_pos+num_neg, 21])
         conf_hnm = conf_data[(pos_idx_mask+neg_idx_mask).gt(0)
-                             ].view(-1, num_classes)
+                             ].view(-1, 2)
+        #print(conf_hnm.size)
         # （注釈）gtは greater than (>)の略称。これでmaskが1のindexを取り出す。
         # pos_idx_mask+neg_idx_maskは足し算だが、indexへのmaskをまとめているだけである。
         # つまり、posであろうがnegであろうが、マスクが1のものを足し算で一つのリストにし、それをgtで取得
 
         # 同様に教師データであるconf_t_labelからposとnegだけを取り出してconf_t_label_hnmに
         # 形はtorch.Size([pos+neg])になる
-        conf_t_label_hnm = conf_t_label[(pos_mask+neg_mask).gt(0)]
+        conf_l_label_hnm = conf_l_label[(pos_mask+neg_mask).gt(0)]
 
         # confidenceの損失関数を計算（要素の合計=sumを求める）
-        loss_c = F.cross_entropy(conf_hnm, conf_t_label_hnm, reduction='sum')
+        loss_c = F.cross_entropy(conf_hnm, conf_l_label_hnm, reduction='sum')
 
         # 物体を発見したBBoxの数N（全ミニバッチの合計）で損失を割り算
         N = num_pos.sum()
-        N1 = len(ig_idx)
+        
         loss_l /= N
         loss_c /= N
         #loss_p /= N1
-        #loss_p /= N1
         # 記述子のトリプレットロスの実装
+        pos_mask = conf_t_label > 0 # torch.Size([num_batch, 8732])
+        #print(pos_mask)
+        # pos_maskをloc_dataのサイズに変形
+        #print(conf_t_label)
+        #print(conf_t_label)
+        conf_line_label = conf_t_label.unsqueeze(dim=2)
+        pos_idx = pos_mask.unsqueeze(pos_mask.dim()).expand_as(conf_line_label)
+        #print(pos_idx.size())
+        #print(pos_idx)
+        # Positive DBoxのloc_dataと、教師データloc_tを取得
         
-        #from pytorch_metric_learning import miners, losses
-        #miner_1 = miners.PairMarginMiner(pos_margin=0.2, neg_margin=0.8)#トリプレットマイナー
-        #miner_2 = miners.TripletMarginMiner(margin=0.2,type_of_triplets="semihard")#ペアマイナー
-        #loss_func = losses.TripletMarginLoss(margin=0.2)#トリプレットロス
-        
-        pos_idx = pos_mask_1.unsqueeze(pos_mask_1.dim()).expand_as(line_data)
-        #print(line_data.size())
-        line_p = line_data[pos_idx].view(-1, 32)
-        #print(line_p)
-        ig_idx = ig_mask_1.unsqueeze(ig_mask_1.dim()).expand_as(line_p)
-        line_p = line_p[ig_idx].view(-1,32)
-        #print(line_p)
-        conf_pt_label = conf_pt_label.unsqueeze(dim=2)
-        #print(conf_pt_label.size())
-        pos_idx = pos_mask_1.unsqueeze(pos_mask_1.dim()).expand_as(conf_pt_label)
-        conf_pt_label = conf_pt_label[pos_idx].view(-1,1)
-        #print(conf_pt)
-
-        ig_idx = ig_mask_1.unsqueeze(ig_mask_1.dim()).expand_as(conf_pt_label)
-        conf_pt_label = conf_pt_label[ig_idx].view(-1,1)
-        #print(conf_pt_label)
-        #print(conf_pt.squeeze().dim())
-        conf_pt_label = torch.squeeze(conf_pt_label,dim=1)
-        #print(conf_pt_label)
-
+        conf_line = conf_line_label[pos_idx]
+       
         distance = distances.LpDistance(normalize_embeddings = False)
         #miner_1 = miners.PairMarginMiner(distance = distance,pos_margin=0, neg_margin=0)#トリプレットマイナー
         #miner_2 = miners.TripletMarginMiner(distance = distance,margin=1.0,type_of_triplets="hard")#ペアマイナー
         miner_3 = miners.BatchEasyHardMiner(distance = distance,pos_strategy="easy",neg_strategy="hard")
+        miner_4 = miners.BatchEasyHardMiner(distance = distance,pos_strategy="hard",neg_strategy="hard")
         
-        #loss_func = losses.TripletMarginLoss(distance = distance,margin=1.0)#トリプレットロス
-        a13,p3,a23,n3 = miner_3(line_p.to(torch.float32),conf_pt_label)
-        #mine_t = miner_2(line_p.to(torch.float32),conf_pt_label)#トリプレットマイナー
-        #a,p,n = miner_2(line_p.to(torch.float32),conf_pt_label)#トリプレットマイナー
-        #a1_l,p_l,a2_l,n_l = miner_1(line_p.to(torch.float32),conf_pt_label)#ペアマイナー
+        loss_func = losses.TripletMarginLoss(distance = distance,margin=1.0)#トリプレットロス
+        a13,p3,a23,n3 = miner_3(line_p.to(torch.float32),conf_line)
+
+        loss_t = loss_func(line_p.to(torch.float32),conf_line,(a13,p3,n3))
+        anc_line = line_p[a13[:]].to(self.device,non_blocking=True)
+        pos_line = line_p[p3[:]].to(self.device,non_blocking=True)
+        neg_line = line_p[n3[:]].to(self.device,non_blocking=True)
+        #print(a13.size())
+        anc_pose_p = pose_p[a13[:]].to(self.device,non_blocking=True)
+        pos_pose_p = pose_p[p3[:]].to(self.device,non_blocking=True)
+        #neg_pose_p = pose_p[n3[:]]
+        anc_pose_t = pose_t[a13[:]].to(self.device,non_blocking=True)
+        pos_pose_t = pose_t[p3[:]].to(self.device,non_blocking=True)
+        #neg_pose_t = pose_t[n3[:]]
+        anc_conf_line = conf_line[a13[:]]
         
-        #triplet_loss = nn.TripletMarginLoss(Margin = 10.0,p=2,eps=1,reduction='mean')
-        anc_line = line_p[a13[:]]
-        pos_line = line_p[p3[:]]
-        neg_line = line_p[n3[:]]
-        #loss_p = ((pose_p - pose_t)**2).sum()
-        anc_pose_p = pose_p[a13[:]]
-        pos_pose_p = pose_p[p3[:]]
-        neg_pose_p = pose_p[n3[:]]
-        anc_pose_t = pose_t[a13[:]]
-        pos_pose_t = pose_t[p3[:]]
-        neg_pose_t = pose_t[n3[:]]
-
-        loss_t = 0.0
-        #print(a13[0])
-        for i in range(len(anc_line)):
-            loss_t += F.triplet_margin_loss(anc_line[i],pos_line[i],neg_line[i])
-
-        if len(a13) == 0:
-            loss_t = 0.0
-        else:
-            loss_t = loss_t / len(a13)
-        T = 0
-        #for (i,j,k,l,m,n) in zip(anc_pose_p,anc_pose_t,pos_pose_p,pos_pose_t,neg_pose_p,neg_pose_t):
-            #if torch.dot(i,k) < 0:
-                #anc_pose_p[T] = -anc_pose_p[T]
-            #if torch.dot(k,l) < 0:
-                #pos_pose_p[T] = -pos_pose_p[T]
-            #if torch.dot(m,n) < 0:
-                #neg_pose_p[T] = -neg_pose_p[T]
-            #T = T + 1
-        for i,name in enumerate(anc_pose_p):
-            if torch.dot(anc_pose_p[i],anc_pose_t[i]) < 0:
-                anc_pose_p[i] = -anc_pose_p[i]
-        for i,name in enumerate(pos_pose_p):
-            if torch.dot(pos_pose_p[i],pos_pose_t[i]) < 0:
-                pos_pose_p[i] = -pos_pose_p[i]
-        #for i,name in enumerate(neg_pose_p):
-            #if torch.dot(neg_pose_p[i],neg_pose_t[i]) < 0:
-                #neg_pose_p[i] = -neg_pose_p[i]
-
-        loss_p_a = ((anc_pose_p - anc_pose_t)**2).sum()
-        loss_p_p = ((pos_pose_p - pos_pose_t)**2).sum()
-        #loss_p_n = ((neg_pose_p - neg_pose_t)**2).sum()
-
-        if len(a13)+len(p3) == 0:
-            loss_p = 0.0
-        else:
-            loss_p = (loss_p_a + loss_p_p) / (len(a13)+len(p3))
-
+        a,p_hard,aa,n = miner_4(anc_pose_t,anc_conf_line)#アンカーに対してクラスごとに最も姿勢が似ていないポーズの番号を取得（P_hard)
+        
+        a,p_easy,aa,n = miner_3(anc_pose_t,anc_conf_line)#アンカーに対してクラスごとに最も姿勢が似ているポーズの番号を取得（P_easy）
+        
+        loss_t_pose = loss_func(anc_line.to(torch.float32),anc_conf_line,(a,p_easy,p_hard))
+        
         ploss = anc_line - pos_line
         
-        #ploss = normalize(ploss,p=2.0, dim = 1)
         ploss = (ploss**2).sum(dim=1)
         
-        #print(ploss)
         qloss = anc_pose_t - pos_pose_t
-        #print(qloss)
     
         qloss = (qloss**2).sum(dim=1)
-        #print(qloss)
-        #print(qloss.size())
-        #print(len(a1_l))
+        
         Ldesk = ((ploss - qloss)**2).sum()
-                
-        #Ldesk = (Ldesk / len(a1_l)) + (loss_t / (len(a1_l)+len(a2_l)))
+            
         if len(a13) == 0:
             Ldesk = 0.0
         else:
             Ldesk = Ldesk / len(a13)
-
-        loss_l = 0.0
-        loss_c = 0.0
-        #loss_p = 0.0
-        #Ldesk = 0.0
-        return loss_l,loss_c,loss_p,Ldesk,loss_t
+       
+        loss_p = ((pose_p - pose_t)**2).sum().to(self.device,non_blocking=True)
+        loss_p /= pose_p.size(0)
+         
+        return loss_l,loss_c,loss_p,Ldesk,loss_t,loss_t_pose
         #return loss_l,loss_c,loss_p

@@ -195,12 +195,11 @@ class Anno_xml2list(object):
                     
                     l_name_n = np.array(l_name[j])
                     r = Rotation.from_matrix(l_name_n.reshape(3,3))
-                    rv = r.as_quat()
-                    p1,p2,p3,p4 = rv
+                    rv = r.as_rotvec()
+                    p1,p2,p3 = rv
                     bndbox.append(p1)
                     bndbox.append(p2)
                     bndbox.append(p3)
-                    bndbox.append(p4)
                     
                     break
                     
@@ -333,7 +332,7 @@ class VOCDataset(data.Dataset):
         gt = np.hstack((boxes, np.expand_dims(labels, axis=1)))
         #print(gt)
         #print(anno_list[:,5:8])
-        gt = np.hstack((gt ,anno_list[:,5:10]))
+        gt = np.hstack((gt ,anno_list[:,5:9]))
         
         return img, gt, height, width
 
@@ -439,7 +438,7 @@ def make_loc_conf(num_classes=21, bbox_aspect_num=[4, 6, 6, 6, 4, 4]):
                              * 32, kernel_size=3, padding=1)]
     line_layer_1 +=[nn.Conv2d(bbox_aspect_num[0] * 32,bbox_aspect_num[0]*4
                              ,kernel_size=1, padding=0)]
-    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[0] * 4,bbox_aspect_num[0]*4
+    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[0] * 4,bbox_aspect_num[0]*3
                              ,kernel_size=1, padding=0)]
 
     # VGGの最終層（source2）に対する畳み込み層
@@ -451,7 +450,7 @@ def make_loc_conf(num_classes=21, bbox_aspect_num=[4, 6, 6, 6, 4, 4]):
                              * 32, kernel_size=3, padding=1)]
     line_layer_1 +=[nn.Conv2d(bbox_aspect_num[1] * 32,bbox_aspect_num[1]*4
                              ,kernel_size=1, padding=0)]
-    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[1] * 4,bbox_aspect_num[1]*4
+    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[1] * 4,bbox_aspect_num[1]*3
                              ,kernel_size=1, padding=0)]
     
     # extraの（source3）に対する畳み込み層
@@ -463,7 +462,7 @@ def make_loc_conf(num_classes=21, bbox_aspect_num=[4, 6, 6, 6, 4, 4]):
                              * 32, kernel_size=3, padding=1)]
     line_layer_1 +=[nn.Conv2d(bbox_aspect_num[2] * 32,bbox_aspect_num[2]*4
                              ,kernel_size=1, padding=0)]
-    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[2] * 4,bbox_aspect_num[2]*4
+    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[2] * 4,bbox_aspect_num[2]*3
                              ,kernel_size=1, padding=0)]
     
     # extraの（source4）に対する畳み込み層
@@ -475,7 +474,7 @@ def make_loc_conf(num_classes=21, bbox_aspect_num=[4, 6, 6, 6, 4, 4]):
                              * 32, kernel_size=3, padding=1)]
     line_layer_1 +=[nn.Conv2d(bbox_aspect_num[3] * 32,bbox_aspect_num[3]*4
                              ,kernel_size=1, padding=0)]
-    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[3] * 4,bbox_aspect_num[3]*4
+    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[3] * 4,bbox_aspect_num[3]*3
                              ,kernel_size=1, padding=0)]
 
     # extraの（source5）に対する畳み込み層
@@ -487,7 +486,7 @@ def make_loc_conf(num_classes=21, bbox_aspect_num=[4, 6, 6, 6, 4, 4]):
                              * 32, kernel_size=3, padding=1)]
     line_layer_1 +=[nn.Conv2d(bbox_aspect_num[4] * 32,bbox_aspect_num[4]*4
                              ,kernel_size=1, padding=0)]
-    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[4] * 4,bbox_aspect_num[4]*4
+    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[4] * 4,bbox_aspect_num[4]*3
                              ,kernel_size=1, padding=0)]
 
     # extraの（source6）に対する畳み込み層
@@ -499,7 +498,7 @@ def make_loc_conf(num_classes=21, bbox_aspect_num=[4, 6, 6, 6, 4, 4]):
                              * 32, kernel_size=3, padding=1)]
     line_layer_1 +=[nn.Conv2d(bbox_aspect_num[5] * 32,bbox_aspect_num[5]*4
                              ,kernel_size=1, padding=0)]
-    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[5] * 4,bbox_aspect_num[5]*4
+    line_layer_2 +=[nn.Conv2d(bbox_aspect_num[5] * 4,bbox_aspect_num[5]*3
                              ,kernel_size=1, padding=0)]
     
     
@@ -699,14 +698,10 @@ def nm_suppression(boxes, scores, overlap=0.45, top_k=200):
         # これからkeepに格納したBBoxと被りの大きいBBoxを抽出して除去する
         # -------------------
         # ひとつ減らしたidxまでのBBoxを、outに指定した変数として作成する
-        tmp_x1 = torch.index_select(x1, 0, idx)
-        tmp_y1 = torch.index_select(y1, 0, idx)
-        tmp_x2 = torch.index_select(x2, 0, idx)
-        tmp_y2 = torch.index_select(y2, 0, idx)
-        #torch.index_select(x1, 0, idx, out=tmp_x1)
-        #torch.index_select(y1, 0, idx, out=tmp_y1)
-        #torch.index_select(x2, 0, idx, out=tmp_x2)
-        #torch.index_select(y2, 0, idx, out=tmp_y2)
+        torch.index_select(x1, 0, idx, out=tmp_x1)
+        torch.index_select(y1, 0, idx, out=tmp_y1)
+        torch.index_select(x2, 0, idx, out=tmp_x2)
+        torch.index_select(y2, 0, idx, out=tmp_y2)
 
         # すべてのBBoxに対して、現在のBBox=indexがiと被っている値までに設定(clamp)
         tmp_x1 = torch.clamp(tmp_x1, min=x1[i])
@@ -750,7 +745,6 @@ class Detect():
 
     def __init__(self, conf_thresh=0.01, top_k=200, nms_thresh=0.45):
         self.softmax = nn.Softmax(dim=-1)  # confをソフトマックス関数で正規化するために用意
-        #self.l2 = 
         self.conf_thresh = conf_thresh  # confがconf_thresh=0.01より高いDBoxのみを扱う
         self.top_k = top_k  # nm_supressionでconfの高いtop_k個を計算に使用する, top_k = 200
         self.nms_thresh = nms_thresh  # nm_supressionでIOUがnms_thresh=0.45より大きいと、同一物体へのBBoxとみなす
@@ -770,7 +764,7 @@ class Detect():
         pose_list[batch_num,8732,32]
             記述子の情報
         line_list
-            姿勢の情報[batch_num,8732,4]
+            姿勢の情報[batch_num,8732,3]
         Returns
         -------
         output : torch.Size([batch_num, 21, 200, 5+32+3])
@@ -784,10 +778,9 @@ class Detect():
 
         # confはソフトマックスを適用して正規化する
         conf_data = self.softmax(conf_data)
-        # lineはL2正規化を行う
 
         # 出力の型を作成する。テンソルサイズは[minibatch数, 21, 200, 5+32+3]
-        output = torch.zeros(num_batch, num_classes, self.top_k, 5+32+4)
+        output = torch.zeros(num_batch, num_classes, self.top_k, 5+32+3)
 
         # cof_dataを[batch_num,8732,num_classes]から[batch_num, num_classes,8732]に順番変更
         conf_preds = conf_data.transpose(2, 1)
@@ -846,11 +839,11 @@ class Detect():
                 
                 poses = decoded_poses[p_mask].view(-1,32)
                 
-                lines = decoded_lines[li_mask].view(-1,4)
+                lines = decoded_lines[li_mask].view(-1,3)
                 
                 # 3. Non-Maximum Suppressionを実施し、被っているBBoxを取り除く
                 ids, count = nm_suppression(
-                    boxes.detach(), scores.detach(), self.nms_thresh, self.top_k)
+                    boxes, scores, self.nms_thresh, self.top_k)
                 # ids：confの降順にNon-Maximum Suppressionを通過したindexが格納
                 # count：Non-Maximum Suppressionを通過したBBoxの数
 
@@ -858,7 +851,7 @@ class Detect():
                 output[i, cl, :count] = torch.cat((scores[ids[:count]].unsqueeze(1),
                                                    boxes[ids[:count]],poses[ids[:count]],lines[ids[:count]]),1)
                 
-        return output  # torch.Size([1, 21, 200, 5+32+4])
+        return output  # torch.Size([1, 21, 200, 5+32+3])
 
 # SSDクラスを作成する
 
@@ -924,7 +917,7 @@ class SSD(nn.Module):
             i = 0
             loc.append(l(x).permute(0, 2, 3, 1).contiguous())
             conf.append(c(x).permute(0, 2, 3, 1).contiguous())
-            pose.append(p(x).permute(0, 2, 3, 1).contiguous())
+            pose.append(F.relu(p(x)).permute(0, 2, 3, 1).contiguous())
             #P = F.relu(F.BatchNorm2d(p(x)))
             #pose.append(P.permute(0, 2, 3, 1).contiguous())
             #pose_sources.append(P)
@@ -958,7 +951,7 @@ class SSD(nn.Module):
         loc = loc.view(loc.size(0), -1, 4)
         conf = conf.view(conf.size(0), -1, self.num_classes)
         pose = pose.view(loc.size(0), -1, 32)
-        line = line.view(loc.size(0), -1, 4)
+        line = line.view(loc.size(0), -1, 3)
         
         # 最後に出力する
         output = (loc, conf, pose, line, self.dbox_list)
@@ -1022,12 +1015,12 @@ class MultiBoxLoss(nn.Module):
         # conf_t_label：各DBoxに一番近い正解のBBoxのラベルを格納させる
         # loc_t:各DBoxに一番近い正解のBBoxの位置情報を格納させる
         # pose_t:各DBoxに一番近い正解のポーズを格納させる
-        conf_t_label = torch.LongTensor(num_batch, num_dbox).to(self.device,non_blocking=True)
-        conf_pt_label = torch.LongTensor(num_batch, num_dbox).to(self.device,non_blocking=True)
-        loc_t = torch.Tensor(num_batch, num_dbox, 4).to(self.device,non_blocking=True)
-        pose_t = torch.Tensor(num_batch, num_dbox, 4).to(self.device,non_blocking=True)
-        ignore_t = torch.LongTensor(num_batch, num_dbox).to(self.device,non_blocking=True)
-        ignore_pt = torch.LongTensor(num_batch, num_dbox).to(self.device,non_blocking=True)
+        conf_t_label = torch.LongTensor(num_batch, num_dbox).to(self.device)
+        conf_pt_label = torch.LongTensor(num_batch, num_dbox).to(self.device)
+        loc_t = torch.Tensor(num_batch, num_dbox, 4).to(self.device)
+        pose_t = torch.Tensor(num_batch, num_dbox, 3).to(self.device)
+        ignore_t = torch.LongTensor(num_batch, num_dbox).to(self.device)
+        ignore_pt = torch.LongTensor(num_batch, num_dbox).to(self.device)
         
 
         # loc_tとconf_t_labelに、
@@ -1035,15 +1028,15 @@ class MultiBoxLoss(nn.Module):
         for idx in range(num_batch):  # ミニバッチでループ
             # targets : [num_batch, num_objs, 9]
             # 現在のミニバッチの正解アノテーションのBBoxとラベルを取得
-            truths = targets[idx][:, 0:4].to(self.device,non_blocking=True)  # BBox
+            truths = targets[idx][:, 0:4].to(self.device)  # BBox
             # ラベル [物体1のラベル, 物体2のラベル, …]
-            labels = targets[idx][:, 4].to(self.device,non_blocking=True)
+            labels = targets[idx][:, 4].to(self.device)
             # ポーズ[物体1のポーズ、物体2のポーズ, ...]
-            poses =  targets[idx][:, 5:9].to(self.device,non_blocking=True)
+            poses =  targets[idx][:, 5:8].to(self.device)
             # ignore[muzukasiibuttai]
-            ignore = targets[idx][:, 9].to(self.device,non_blocking=True)
+            ignore = targets[idx][:, 8].to(self.device)
             # デフォルトボックスを新たな変数で用意
-            dbox = dbox_list.to(self.device,non_blocking=True)
+            dbox = dbox_list.to(self.device)
 
             # 関数matchを実行し、loc_tとconf_t_labelの内容を更新する
             # （詳細）
@@ -1057,7 +1050,7 @@ class MultiBoxLoss(nn.Module):
             match(self.jaccard_thresh, truths, dbox,
                   variance, labels,ignore,loc_t, conf_t_label,ignore_t,idx)
                   
-            match2(self.jaccard_thresh+0.4, truths, dbox,
+            match2(self.jaccard_thresh+0.2, truths, dbox,
                   variance, labels,poses, ignore,conf_pt_label, pose_t,ignore_pt,idx)
 
         # ----------
@@ -1084,11 +1077,11 @@ class MultiBoxLoss(nn.Module):
         loc_p = loc_data[pos_idx].view(-1, 4)
         loc_t = loc_t[pos_idx].view(-1, 4)
         
-        #ig_idx = ig_mask.unsqueeze(ig_mask.dim()).expand_as(loc_p)
+        ig_idx = ig_mask.unsqueeze(ig_mask.dim()).expand_as(loc_p)
         
         #ignorekarakyousidata wosyutoku
-        #loc_p = loc_p[ig_mask].view(-1,4)
-        #loc_t = loc_t[ig_mask].view(-1,4)
+        loc_p = loc_p[ig_mask].view(-1,4)
+        loc_t = loc_t[ig_mask].view(-1,4)
         
         # 物体を発見したPositive DBoxのオフセット情報loc_tの損失（誤差）を計算
         loss_l = F.smooth_l1_loss(loc_p, loc_t, reduction='sum')
@@ -1102,18 +1095,19 @@ class MultiBoxLoss(nn.Module):
         # Positive DBoxのloc_dataと、教師データloc_tを取得
         pos_idx = pos_mask_1.unsqueeze(pos_mask.dim()).expand_as(pose_data)
                 
-        pose_p = pose_data[pos_idx].view(-1, 4)
-        pose_t = pose_t[pos_idx].view(-1, 4)
+        pose_p = pose_data[pos_idx].view(-1, 3)
+        pose_t = pose_t[pos_idx].view(-1, 3)
 
         ig_idx = ig_mask_1.unsqueeze(ig_mask_1.dim()).expand_as(pose_p)
         #print(pose_p.dtype)
         #print(pose_t.dtype)
         #print(ig_idx.dtype)
-        pose_p = pose_p[ig_idx].view(-1, 4)
-        pose_t = pose_t[ig_idx].view(-1, 4)
+        pose_p = pose_p[ig_idx].view(-1, 3)
+        pose_t = pose_t[ig_idx].view(-1, 3)
         
 
         #loss_p = ((pose_p - pose_t)**2).sum()
+        loss_p = 0.0
         
         # ----------
         # 種類を出力
@@ -1211,16 +1205,16 @@ class MultiBoxLoss(nn.Module):
         # 物体を発見したBBoxの数N（全ミニバッチの合計）で損失を割り算
         N = num_pos.sum()
         N1 = len(ig_idx)
-        loss_l /= N
+        
+        loss_l /= N1
         loss_c /= N
-        #loss_p /= N1
-        #loss_p /= N1
+        loss_p /= N1
         # 記述子のトリプレットロスの実装
         
         #from pytorch_metric_learning import miners, losses
-        #miner_1 = miners.PairMarginMiner(pos_margin=0.2, neg_margin=0.8)#トリプレットマイナー
-        #miner_2 = miners.TripletMarginMiner(margin=0.2,type_of_triplets="semihard")#ペアマイナー
-        #loss_func = losses.TripletMarginLoss(margin=0.2)#トリプレットロス
+        miner_1 = miners.PairMarginMiner(pos_margin=0.2, neg_margin=0.8)#トリプレットマイナー
+        miner_2 = miners.TripletMarginMiner(margin=0.2,type_of_triplets="semihard")#ペアマイナー
+        loss_func = losses.TripletMarginLoss(margin=0.2)#トリプレットロス
         
         pos_idx = pos_mask_1.unsqueeze(pos_mask_1.dim()).expand_as(line_data)
         #print(line_data.size())
@@ -1241,91 +1235,47 @@ class MultiBoxLoss(nn.Module):
         #print(conf_pt.squeeze().dim())
         conf_pt_label = torch.squeeze(conf_pt_label,dim=1)
         #print(conf_pt_label)
+        #mine_t = miner_2(line_p,conf_pt_label)#トリプレットマイナー
+        #a,p,n = miner_2(line_p,conf_pt_label)#トリプレットマイナー
+        #a1_l,p_l,a2_l,n_l = miner_1(line_p,conf_pt_label)#ペアマイナー
+        #loss_func = losses.TripletMarginLoss(margin=0.2)#トリプレットロス
+        #loss_func = losses.TripletMarginLoss(margin=0.2)#トリプレットロス
 
-        distance = distances.LpDistance(normalize_embeddings = False)
-        #miner_1 = miners.PairMarginMiner(distance = distance,pos_margin=0, neg_margin=0)#トリプレットマイナー
-        #miner_2 = miners.TripletMarginMiner(distance = distance,margin=1.0,type_of_triplets="hard")#ペアマイナー
-        miner_3 = miners.BatchEasyHardMiner(distance = distance,pos_strategy="easy",neg_strategy="hard")
+        #loss_t = loss_func(line_p.to(torch.float32),conf_pt_label,mine_t)#トリプレットロス
+        #loss_t = loss_func(line_p,conf_pt_label,mine_t)
+        #for i in range(a.numel()):
+        #loss_t += F.triplet_margin_loss(line_p[a[i]],line_p[p[i]],line_p[n[i]])
+
+        #print(loss_t):
+        #if len(a) == 0:
+            #loss_t = 0.0
+        #else:
+            #loss_t = loss_t / len(a)
+
+        #print(loss_t)
         
-        #loss_func = losses.TripletMarginLoss(distance = distance,margin=1.0)#トリプレットロス
-        a13,p3,a23,n3 = miner_3(line_p.to(torch.float32),conf_pt_label)
-        #mine_t = miner_2(line_p.to(torch.float32),conf_pt_label)#トリプレットマイナー
-        #a,p,n = miner_2(line_p.to(torch.float32),conf_pt_label)#トリプレットマイナー
-        #a1_l,p_l,a2_l,n_l = miner_1(line_p.to(torch.float32),conf_pt_label)#ペアマイナー
+        Ldesk = 0.0
         
-        #triplet_loss = nn.TripletMarginLoss(Margin = 10.0,p=2,eps=1,reduction='mean')
-        anc_line = line_p[a13[:]]
-        pos_line = line_p[p3[:]]
-        neg_line = line_p[n3[:]]
-        #loss_p = ((pose_p - pose_t)**2).sum()
-        anc_pose_p = pose_p[a13[:]]
-        pos_pose_p = pose_p[p3[:]]
-        neg_pose_p = pose_p[n3[:]]
-        anc_pose_t = pose_t[a13[:]]
-        pos_pose_t = pose_t[p3[:]]
-        neg_pose_t = pose_t[n3[:]]
-
-        loss_t = 0.0
-        #print(a13[0])
-        for i in range(len(anc_line)):
-            loss_t += F.triplet_margin_loss(anc_line[i],pos_line[i],neg_line[i])
-
-        if len(a13) == 0:
-            loss_t = 0.0
-        else:
-            loss_t = loss_t / len(a13)
-        T = 0
-        #for (i,j,k,l,m,n) in zip(anc_pose_p,anc_pose_t,pos_pose_p,pos_pose_t,neg_pose_p,neg_pose_t):
-            #if torch.dot(i,k) < 0:
-                #anc_pose_p[T] = -anc_pose_p[T]
-            #if torch.dot(k,l) < 0:
-                #pos_pose_p[T] = -pos_pose_p[T]
-            #if torch.dot(m,n) < 0:
-                #neg_pose_p[T] = -neg_pose_p[T]
-            #T = T + 1
-        for i,name in enumerate(anc_pose_p):
-            if torch.dot(anc_pose_p[i],anc_pose_t[i]) < 0:
-                anc_pose_p[i] = -anc_pose_p[i]
-        for i,name in enumerate(pos_pose_p):
-            if torch.dot(pos_pose_p[i],pos_pose_t[i]) < 0:
-                pos_pose_p[i] = -pos_pose_p[i]
-        #for i,name in enumerate(neg_pose_p):
-            #if torch.dot(neg_pose_p[i],neg_pose_t[i]) < 0:
-                #neg_pose_p[i] = -neg_pose_p[i]
-
-        loss_p_a = ((anc_pose_p - anc_pose_t)**2).sum()
-        loss_p_p = ((pos_pose_p - pos_pose_t)**2).sum()
-        #loss_p_n = ((neg_pose_p - neg_pose_t)**2).sum()
-
-        if len(a13)+len(p3) == 0:
-            loss_p = 0.0
-        else:
-            loss_p = (loss_p_a + loss_p_p) / (len(a13)+len(p3))
-
-        ploss = anc_line - pos_line
-        
-        #ploss = normalize(ploss,p=2.0, dim = 1)
-        ploss = (ploss**2).sum(dim=1)
-        
+        #ploss = line_p[a1_l[:]] - line_p[[p_l][:]]
         #print(ploss)
-        qloss = anc_pose_t - pos_pose_t
+        #ploss = normalize(ploss,p=2.0, dim = 1)
+        #ploss = (ploss**2).sum(dim=1)
+        #print(ploss)
+        #qloss = pose_t[a1_l[:]] - pose_t[[p_l][:]]
         #print(qloss)
-    
-        qloss = (qloss**2).sum(dim=1)
+        #qloss = normalize(qloss,p=2.0, dim = 1)
+        #qloss = (qloss**2).sum(dim=1)
         #print(qloss)
         #print(qloss.size())
         #print(len(a1_l))
-        Ldesk = ((ploss - qloss)**2).sum()
-                
+        #Ldesk = ((ploss - qloss)**2).sum()
+        
         #Ldesk = (Ldesk / len(a1_l)) + (loss_t / (len(a1_l)+len(a2_l)))
-        if len(a13) == 0:
-            Ldesk = 0.0
-        else:
-            Ldesk = Ldesk / len(a13)
-
-        loss_l = 0.0
-        loss_c = 0.0
-        #loss_p = 0.0
-        #Ldesk = 0.0
+        #if len(a1_l) == 0:
+        Ldesk = 0.0
+        #else:
+        #Ldesk = Ldesk / len(a1_l)
+        loss_t = 0.0
+        
         return loss_l,loss_c,loss_p,Ldesk,loss_t
         #return loss_l,loss_c,loss_p

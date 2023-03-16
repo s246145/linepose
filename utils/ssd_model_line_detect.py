@@ -55,9 +55,9 @@ def make_datapath_list(rootpath):#rootpath = /home/s246145/tless
     pose_template = osp.join(rootpath, 'train_pbr'+'/%s'+'/scene_gt.json')
     
     # テスト画像ファイルとアノテーションファイルへのパスのテンプレートを作成
-    imgpath_template_t = osp.join(rootpath, 'test_primesense'+'/%s'+'/rgb'+'/%s.png')
-    coco_template_t = osp.join(rootpath, 'test_primesense'+'/%s'+'/scene_gt_coco_modal.json')
-    pose_template_t = osp.join(rootpath, 'test_primesense'+'/%s'+'/scene_gt.json')
+    imgpath_template_t = osp.join(rootpath, 'test'+'/%s'+'/rgb'+'/%s.png')
+    coco_template_t = osp.join(rootpath, 'test'+'/%s'+'/scene_gt_coco_modal.json')
+    pose_template_t = osp.join(rootpath, 'test'+'/%s'+'/scene_gt.json')
     
     # 訓練データの画像ファイルとアノテーションファイルへのパスリストを作成
     train_img_list = list()
@@ -83,9 +83,9 @@ def make_datapath_list(rootpath):#rootpath = /home/s246145/tless
     val_anno_list = list()
     val_pose_list = list()
     
-    for i in range(20):
-        anno_path = (coco_template_t % str(i+1).zfill(6))  # アノテーションのパス
-        pose_path = (pose_template_t % str(i+1).zfill(6))
+    for i in range(1):
+        anno_path = (coco_template_t % str(i+2).zfill(6))  # アノテーションのパス
+        pose_path = (pose_template_t % str(i+2).zfill(6))
         coco = COCO(anno_path)
         imageids = list(coco.imgToAnns.keys())#アノテーションデータから画像ID番号を取得
         
@@ -94,7 +94,7 @@ def make_datapath_list(rootpath):#rootpath = /home/s246145/tless
             val_pose_list.append(pose_path)
         
         for j in imageids:
-            img_path = (imgpath_template_t % ((str(i+1).zfill(6)),
+            img_path = (imgpath_template_t % ((str(i+2).zfill(6)),
                                             str(j).zfill(6)))  # 画像のパス
             
             val_img_list.append(img_path)  # リストに追加
@@ -197,11 +197,16 @@ class Anno_xml2list(object):
                     r = Rotation.from_matrix(l_name_n.reshape(3,3))
                     rv = r.as_quat()
                     p1,p2,p3,p4 = rv
-                    bndbox.append(p1)
-                    bndbox.append(p2)
-                    bndbox.append(p3)
-                    bndbox.append(p4)
-                    
+                    if p4 < 0:
+                    	bndbox.append(-p1)
+                    	bndbox.append(-p2)
+                    	bndbox.append(-p3)
+                    	bndbox.append(-p4)
+                    else:
+                    	bndbox.append(p1)
+                    	bndbox.append(p2)
+                    	bndbox.append(p3)
+                    	bndbox.append(p4)
                     break
                     
                 i += 1
@@ -218,7 +223,159 @@ class Anno_xml2list(object):
 
 # 入力画像の前処理をするクラス
 
+class Anno_xml2list_test(object):
+    """
+    1枚の画像に対する「XML形式のアノテーションデータ」を、画像サイズで規格化してからリスト形式に変換する。
 
+    Attributes
+    ----------
+    classes : リスト
+        VOCのクラス名を格納したリスト
+    """
+
+    def __init__(self, classes):
+
+        self.classes = classes
+
+    def __call__(self, anno_list, width, height, anno_pose_list,index):
+        """
+        1枚の画像に対する「XML形式のアノテーションデータ」を、画像サイズで規格化してからリスト形式に変換する。
+
+        Parameters
+        ----------
+        anno_list : str
+            画像のアノテーションファイルへのパス。
+        width : int
+            対象画像の幅。
+        height : int
+            対象画像の高さ。
+        anno_pose_list : str
+            画像のポーズ情報ファイルへのパス
+        index : int
+            画像ID番号
+        Returns
+        -------
+        ret : [[xmin, ymin, xmax, ymax, label_ind,pose1,pose2,pose3], ... ]
+            物体のアノテーションデータを格納したリスト。画像内に存在する物体数分のだけ要素を持つ。
+        """
+
+        # 画像内の全ての物体のアノテーションをこのリストに格納します
+        ret = []
+        
+        # アノテーションデータを読み込む
+        coco = COCO(anno_list)
+                
+        categoryids = list(coco.imgToAnns.keys())#画像中の写っている物体のカテゴリIDを取得
+              
+        anno_ids = coco.getAnnIds(categoryids[index % 200])
+        
+        annos = coco.loadAnns(anno_ids)#index番目のidのアノテーションデータを取得
+        j = 0 #画像中の物体のid
+        
+        with open(anno_pose_list) as f:
+            df = json.load(f)#ポーズのアノテーションを取得
+            
+        for anno in annos:#画像中の物体の数だけループ
+        	
+            
+            linds = []
+            bndbox = []
+            cat = coco.loadCats(anno['category_id'])[0]#画像内すべてのカテゴリーを取得
+                
+            #lindsにカテゴリーの名前を入力
+            
+            xmin, ymin, w, h = anno['bbox']#カテゴリーのbboxを取得
+            
+            xmax, ymax = xmin + w, ymin + h
+            
+            xmin /= width
+            xmax /= width
+            
+            ymin /= height
+            ymax /= height
+            
+            bndbox.append(xmin)
+            bndbox.append(ymin)
+            bndbox.append(xmax)
+            bndbox.append(ymax)
+            
+            bndbox.append(self.classes.index(cat['name']))
+            
+            
+            i = 0
+            for A in df.values():#画像の数だけループ
+                
+                l_name = [d["cam_R_m2c"] for d in A]#A番目の画像中の姿勢  
+                
+                if i == (index % 200): #画像の姿勢データがindex番目まで到達すれば、ポーズを代入
+                    
+                    l_name_n = np.array(l_name[j])
+                    r = Rotation.from_matrix(l_name_n.reshape(3,3))
+                    rv = r.as_quat()
+                    p1,p2,p3,p4 = rv
+                    if p4 < 0:
+                    	bndbox.append(-p1)
+                    	bndbox.append(-p2)
+                    	bndbox.append(-p3)
+                    	bndbox.append(-p4)
+                    else:
+                    	bndbox.append(p1)
+                    	bndbox.append(p2)
+                    	bndbox.append(p3)
+                    	bndbox.append(p4)
+                    
+                    break
+                    
+                i += 1
+            
+            j += 1
+            bndbox.append(anno['ignore'])
+            
+            # resに[xmin, ymin, xmax, ymax, label_ind, ポーズアノテーション]を足す
+            
+            ret += [bndbox]
+	
+        return np.array(ret,dtype='float32')  # [[xmin, ymin, xmax, ymax, label_ind], ... ]
+
+def qtoaxis(quat):
+	B = np.zeros(4)
+	A = []
+	C = []
+	x,y,z,w = quat
+	w = torch.acos(w)#cos@/2
+	if torch.sin(w) != 0:
+		x = x/torch.sin(w)
+		y = y/torch.sin(w)
+		z = z/torch.sin(w)
+	else:
+		x = 0
+		y = 0
+		z = 0
+	C.append(x)
+	A.append(y)
+	A.append(z)
+	A.append(w)
+	for i,q in enumerate(A):
+		B[i] = q
+	
+	return(torch.from_numpy(B))
+
+def axistoq(axis):
+	B = np.zeros(4)
+	A = []
+	x,y,z,w = axis
+	
+	x = x*torch.sin(w)
+	y = y*torch.sin(w)
+	z = z*torch.sin(w)
+	A.append(x)
+	A.append(y)
+	A.append(z)
+	A.append(torch.cos(w))
+	for i,q in enumerate(A):
+		B[i] = q
+	return(torch.from_numpy(B))
+	
 class DataTransform():
     """
     画像とアノテーションの前処理クラス。訓練と推論で異なる動作をする。
@@ -237,13 +394,12 @@ class DataTransform():
     def __init__(self, input_size, color_mean):
         self.data_transform = {
             'train': Compose([
-                ConvertFromInts(),  # intをfloat32に変換
-                ToAbsoluteCoords(),  # アノテーションデータの規格化を戻す
-                PhotometricDistort(),  # 画像の色調などをランダムに変化
-                #Expand(color_mean),  # 画像のキャンバスを広げる
-                #RandomSampleCrop(),  # 画像内の部分をランダムに抜き出す
-                #RandomMirror(),  # 画像を反転させる
-                ToPercentCoords(),  # アノテーションデータを0-1に規格化
+                ConvertFromInts(),  # intをfloat32に変換-
+                
+                
+                
+                
+                
                 Resize(input_size),  # 画像サイズをinput_size×input_sizeに変形
                 SubtractMeans(color_mean)  # BGRの色の平均値を引き算
             ]),
@@ -847,7 +1003,7 @@ class Detect():
                 poses = decoded_poses[p_mask].view(-1,32)
                 
                 lines = decoded_lines[li_mask].view(-1,4)
-                
+                 
                 # 3. Non-Maximum Suppressionを実施し、被っているBBoxを取り除く
                 ids, count = nm_suppression(
                     boxes.detach(), scores.detach(), self.nms_thresh, self.top_k)
@@ -924,7 +1080,7 @@ class SSD(nn.Module):
             i = 0
             loc.append(l(x).permute(0, 2, 3, 1).contiguous())
             conf.append(c(x).permute(0, 2, 3, 1).contiguous())
-            pose.append(p(x).permute(0, 2, 3, 1).contiguous())
+            pose.append((p(x).permute(0, 2, 3, 1).contiguous()))
             #P = F.relu(F.BatchNorm2d(p(x)))
             #pose.append(P.permute(0, 2, 3, 1).contiguous())
             #pose_sources.append(P)
@@ -968,7 +1124,8 @@ class SSD(nn.Module):
             # 返り値のサイズは torch.Size([batch_num, 21, 200, 5])
             return self.detect(output[0], output[1], output[2],output[3],output[4])
 
-        else:  # 学習時
+        else: # 学習時
+
             return output
             # 返り値は(loc, conf, dbox_list)のタプル
 
@@ -976,7 +1133,7 @@ class SSD(nn.Module):
 class MultiBoxLoss(nn.Module):
     """SSDの損失関数のクラスです。"""
 
-    def __init__(self, jaccard_thresh=0.5, neg_pos=3, device='cpu'):
+    def __init__(self, jaccard_thresh=0.5, neg_pos=3, device='gpu'):
         super(MultiBoxLoss, self).__init__()
         self.jaccard_thresh = jaccard_thresh  # 0.5 関数matchのjaccard係数の閾値
         self.negpos_ratio = neg_pos  # 3:1 Hard Negative Miningの負と正の比率
@@ -1012,7 +1169,12 @@ class MultiBoxLoss(nn.Module):
 
         # SSDモデルの出力がタプルになっているので、個々にばらす
         loc_data, conf_data, line_data,pose_data,dbox_list = predictions
-
+        
+        #loc_data = torch.nan_to_num(loc_data)
+        #conf_data = torch.nan_to_num(conf_data)
+        #line_data = torch.nan_to_num(line_data)
+        #pose_data = torch.nan_to_num(pose_data)
+        
         # 要素数を把握
         num_batch = loc_data.size(0)  # ミニバッチのサイズ
         num_dbox = loc_data.size(1)  # DBoxの数 = 8732
@@ -1057,7 +1219,7 @@ class MultiBoxLoss(nn.Module):
             match(self.jaccard_thresh, truths, dbox,
                   variance, labels,ignore,loc_t, conf_t_label,ignore_t,idx)
                   
-            match2(self.jaccard_thresh+0.4, truths, dbox,
+            match2(self.jaccard_thresh+0.2, truths, dbox,
                   variance, labels,poses, ignore,conf_pt_label, pose_t,ignore_pt,idx)
 
         # ----------
@@ -1124,7 +1286,7 @@ class MultiBoxLoss(nn.Module):
         # 物体を検出したBBoxを取り出すマスクを作成
         
         # Positive DBoxのloc_dataを取
-        conf_p = conf_t_label[pos_mask].view(-1,1)
+        #conf_p = conf_t_label[pos_mask].view(-1,1)
         #conf_pt = conf_pt_label[pos_mask_1].view(-1,1)
         
         # ----------
@@ -1133,11 +1295,11 @@ class MultiBoxLoss(nn.Module):
         # Hard Negative Miningを実施し、物体発見DBoxと背景クラスDBoxの比が1:3になるようにする。
         # そこで背景クラスDBoxと予想したもののうち、損失が小さいものは、クラス予測の損失から除く
         # ----------
-        batch_conf = conf_data.view(-1, num_classes)
+        #batch_conf = conf_data.view(-1, num_classes)
 
         # クラス予測の損失を関数を計算(reduction='none'にして、和をとらず、次元をつぶさない)
-        loss_c = F.cross_entropy(
-            batch_conf, conf_t_label.view(-1), reduction='none')
+        #loss_c = F.cross_entropy(
+            #batch_conf, conf_t_label.view(-1), reduction='none')
 
         # -----------------
         # これからNegative DBoxのうち、Hard Negative Miningで抽出するものを求めるマスクを作成します
@@ -1145,15 +1307,15 @@ class MultiBoxLoss(nn.Module):
 
         # 物体発見したPositive DBoxの損失を0にする
         # （注意）物体はlabelが1以上になっている。ラベル0は背景。
-        num_pos = pos_mask.long().sum(1, keepdim=True)  # ミニバッチごとの物体クラス予測の数
+        #num_pos = pos_mask.long().sum(1, keepdim=True)  # ミニバッチごとの物体クラス予測の数
         #num_pos_1 = pos_mask_1.long().sum(1, keepdim=True)
-        loss_c = loss_c.view(num_batch, -1)  # torch.Size([num_batch, 8732])
-        loss_c[pos_mask] = 0  # 物体を発見したDBoxは損失0とする
+        #loss_c = loss_c.view(num_batch, -1)  # torch.Size([num_batch, 8732])
+        #loss_c[pos_mask] = 0  # 物体を発見したDBoxは損失0とする
 
         # Hard Negative Miningを実施する
         # 各DBoxの損失の大きさloss_cの順位であるidx_rankを求める
-        _, loss_idx = loss_c.sort(1, descending=True)
-        _, idx_rank = loss_idx.sort(1)
+        #_, loss_idx = loss_c.sort(1, descending=True)
+        #_, idx_rank = loss_idx.sort(1)
 
         # （注釈）
         # 実装コードが特殊で直感的ではないです。
@@ -1176,12 +1338,12 @@ class MultiBoxLoss(nn.Module):
         # 背景のDBoxの数num_negを決める。HardNegative Miningにより、
         # 物体発見のDBoxの数num_posの3倍（self.negpos_ratio倍）とする。
         # ただし、万が一、DBoxの数を超える場合は、DBoxの数を上限とする
-        num_neg = torch.clamp(num_pos*self.negpos_ratio, max=num_dbox)
+        #num_neg = torch.clamp(num_pos*self.negpos_ratio, max=num_dbox)
 
         # idx_rankは各DBoxの損失の大きさが上から何番目なのかが入っている
         # 背景のDBoxの数num_negよりも、順位が低い（すなわち損失が大きい）DBoxを取るマスク作成
         # torch.Size([num_batch, 8732])
-        neg_mask = idx_rank < (num_neg).expand_as(idx_rank)
+        #neg_mask = idx_rank < (num_neg).expand_as(idx_rank)
 
         # -----------------
         # （終了）これからNegative DBoxのうち、Hard Negative Miningで抽出するものを求めるマスクを作成します
@@ -1191,28 +1353,28 @@ class MultiBoxLoss(nn.Module):
         # pos_idx_maskはPositive DBoxのconfを取り出すマスクです
         # neg_idx_maskはHard Negative Miningで抽出したNegative DBoxのconfを取り出すマスクです
         # pos_mask：torch.Size([num_batch, 8732])→pos_idx_mask：torch.Size([num_batch, 8732, 21])
-        pos_idx_mask = pos_mask.unsqueeze(2).expand_as(conf_data)
-        neg_idx_mask = neg_mask.unsqueeze(2).expand_as(conf_data)
+        #pos_idx_mask = pos_mask.unsqueeze(2).expand_as(conf_data)
+        #neg_idx_mask = neg_mask.unsqueeze(2).expand_as(conf_data)
 
         # conf_dataからposとnegだけを取り出してconf_hnmにする。形はtorch.Size([num_pos+num_neg, 21])
-        conf_hnm = conf_data[(pos_idx_mask+neg_idx_mask).gt(0)
-                             ].view(-1, num_classes)
+        #conf_hnm = conf_data[(pos_idx_mask).gt(0)
+        #                     ].view(-1, num_classes)
         # （注釈）gtは greater than (>)の略称。これでmaskが1のindexを取り出す。
         # pos_idx_mask+neg_idx_maskは足し算だが、indexへのmaskをまとめているだけである。
         # つまり、posであろうがnegであろうが、マスクが1のものを足し算で一つのリストにし、それをgtで取得
 
         # 同様に教師データであるconf_t_labelからposとnegだけを取り出してconf_t_label_hnmに
         # 形はtorch.Size([pos+neg])になる
-        conf_t_label_hnm = conf_t_label[(pos_mask+neg_mask).gt(0)]
-
+        #conf_t_label_hnm = conf_t_label[(pos_mask).gt(0)]
+        #print(conf_t_label_hnm)
         # confidenceの損失関数を計算（要素の合計=sumを求める）
-        loss_c = F.cross_entropy(conf_hnm, conf_t_label_hnm, reduction='sum')
+        #loss_c = F.cross_entropy(conf_hnm, conf_t_label_hnm, reduction='sum')
 
         # 物体を発見したBBoxの数N（全ミニバッチの合計）で損失を割り算
-        N = num_pos.sum()
-        N1 = len(ig_idx)
-        loss_l /= N
-        loss_c /= N
+        #N = num_pos.sum()
+        #N1 = len(ig_idx)
+        #loss_l /= N
+        #loss_c /= N
         #loss_p /= N1
         #loss_p /= N1
         # 記述子のトリプレットロスの実装
@@ -1242,90 +1404,13 @@ class MultiBoxLoss(nn.Module):
         conf_pt_label = torch.squeeze(conf_pt_label,dim=1)
         #print(conf_pt_label)
 
-        distance = distances.LpDistance(normalize_embeddings = False)
+        #distance = distances.LpDistance(normalize_embeddings = False)
         #miner_1 = miners.PairMarginMiner(distance = distance,pos_margin=0, neg_margin=0)#トリプレットマイナー
         #miner_2 = miners.TripletMarginMiner(distance = distance,margin=1.0,type_of_triplets="hard")#ペアマイナー
-        miner_3 = miners.BatchEasyHardMiner(distance = distance,pos_strategy="easy",neg_strategy="hard")
+        #miner_3 = miners.BatchEasyHardMiner(distance = distance,pos_strategy="easy",neg_strategy="hard")
         
         #loss_func = losses.TripletMarginLoss(distance = distance,margin=1.0)#トリプレットロス
-        a13,p3,a23,n3 = miner_3(line_p.to(torch.float32),conf_pt_label)
-        #mine_t = miner_2(line_p.to(torch.float32),conf_pt_label)#トリプレットマイナー
-        #a,p,n = miner_2(line_p.to(torch.float32),conf_pt_label)#トリプレットマイナー
-        #a1_l,p_l,a2_l,n_l = miner_1(line_p.to(torch.float32),conf_pt_label)#ペアマイナー
+        #a13,p3,a23,n3 = miner_3(line_p.to(torch.float32),conf_pt_label)
         
-        #triplet_loss = nn.TripletMarginLoss(Margin = 10.0,p=2,eps=1,reduction='mean')
-        anc_line = line_p[a13[:]]
-        pos_line = line_p[p3[:]]
-        neg_line = line_p[n3[:]]
-        #loss_p = ((pose_p - pose_t)**2).sum()
-        anc_pose_p = pose_p[a13[:]]
-        pos_pose_p = pose_p[p3[:]]
-        neg_pose_p = pose_p[n3[:]]
-        anc_pose_t = pose_t[a13[:]]
-        pos_pose_t = pose_t[p3[:]]
-        neg_pose_t = pose_t[n3[:]]
-
-        loss_t = 0.0
-        #print(a13[0])
-        for i in range(len(anc_line)):
-            loss_t += F.triplet_margin_loss(anc_line[i],pos_line[i],neg_line[i])
-
-        if len(a13) == 0:
-            loss_t = 0.0
-        else:
-            loss_t = loss_t / len(a13)
-        T = 0
-        #for (i,j,k,l,m,n) in zip(anc_pose_p,anc_pose_t,pos_pose_p,pos_pose_t,neg_pose_p,neg_pose_t):
-            #if torch.dot(i,k) < 0:
-                #anc_pose_p[T] = -anc_pose_p[T]
-            #if torch.dot(k,l) < 0:
-                #pos_pose_p[T] = -pos_pose_p[T]
-            #if torch.dot(m,n) < 0:
-                #neg_pose_p[T] = -neg_pose_p[T]
-            #T = T + 1
-        for i,name in enumerate(anc_pose_p):
-            if torch.dot(anc_pose_p[i],anc_pose_t[i]) < 0:
-                anc_pose_p[i] = -anc_pose_p[i]
-        for i,name in enumerate(pos_pose_p):
-            if torch.dot(pos_pose_p[i],pos_pose_t[i]) < 0:
-                pos_pose_p[i] = -pos_pose_p[i]
-        #for i,name in enumerate(neg_pose_p):
-            #if torch.dot(neg_pose_p[i],neg_pose_t[i]) < 0:
-                #neg_pose_p[i] = -neg_pose_p[i]
-
-        loss_p_a = ((anc_pose_p - anc_pose_t)**2).sum()
-        loss_p_p = ((pos_pose_p - pos_pose_t)**2).sum()
-        #loss_p_n = ((neg_pose_p - neg_pose_t)**2).sum()
-
-        if len(a13)+len(p3) == 0:
-            loss_p = 0.0
-        else:
-            loss_p = (loss_p_a + loss_p_p) / (len(a13)+len(p3))
-
-        ploss = anc_line - pos_line
-        
-        #ploss = normalize(ploss,p=2.0, dim = 1)
-        ploss = (ploss**2).sum(dim=1)
-        
-        #print(ploss)
-        qloss = anc_pose_t - pos_pose_t
-        #print(qloss)
-    
-        qloss = (qloss**2).sum(dim=1)
-        #print(qloss)
-        #print(qloss.size())
-        #print(len(a1_l))
-        Ldesk = ((ploss - qloss)**2).sum()
-                
-        #Ldesk = (Ldesk / len(a1_l)) + (loss_t / (len(a1_l)+len(a2_l)))
-        if len(a13) == 0:
-            Ldesk = 0.0
-        else:
-            Ldesk = Ldesk / len(a13)
-
-        loss_l = 0.0
-        loss_c = 0.0
-        #loss_p = 0.0
-        #Ldesk = 0.0
-        return loss_l,loss_c,loss_p,Ldesk,loss_t
+        return line_p,conf_pt_label
         #return loss_l,loss_c,loss_p

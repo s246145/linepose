@@ -151,7 +151,7 @@ class Anno_xml2list(object):
                 
         categoryids = list(coco.imgToAnns.keys())#画像中の写っている物体のカテゴリIDを取得
               
-        anno_ids = coco.getAnnIds(categoryids[index % 1000])
+        anno_ids = coco.getAnnIds(categoryids[index % 50])
         
         annos = coco.loadAnns(anno_ids)#index番目のidのアノテーションデータを取得
         j = 0 #画像中の物体のid
@@ -191,7 +191,7 @@ class Anno_xml2list(object):
                 
                 l_name = [d["cam_R_m2c"] for d in A]#A番目の画像中の姿勢  
                 
-                if i == (index % 1000): #画像の姿勢データがindex番目まで到達すれば、ポーズを代入
+                if i == (index % 50): #画像の姿勢データがindex番目まで到達すれば、ポーズを代入
                     
                     l_name_n = np.array(l_name[j])
                     r = Rotation.from_matrix(l_name_n.reshape(3,3))
@@ -333,7 +333,7 @@ class VOCDataset(data.Dataset):
         gt = np.hstack((boxes, np.expand_dims(labels, axis=1)))
         #print(gt)
         #print(anno_list[:,5:8])
-        gt = np.hstack((gt ,anno_list[:,5:10]))
+        gt = np.hstack((gt ,anno_list[:,5:11]))
         
         return img, gt, height, width
 
@@ -699,14 +699,10 @@ def nm_suppression(boxes, scores, overlap=0.45, top_k=200):
         # これからkeepに格納したBBoxと被りの大きいBBoxを抽出して除去する
         # -------------------
         # ひとつ減らしたidxまでのBBoxを、outに指定した変数として作成する
-        tmp_x1 = torch.index_select(x1, 0, idx)
-        tmp_y1 = torch.index_select(y1, 0, idx)
-        tmp_x2 = torch.index_select(x2, 0, idx)
-        tmp_y2 = torch.index_select(y2, 0, idx)
-        #torch.index_select(x1, 0, idx, out=tmp_x1)
-        #torch.index_select(y1, 0, idx, out=tmp_y1)
-        #torch.index_select(x2, 0, idx, out=tmp_x2)
-        #torch.index_select(y2, 0, idx, out=tmp_y2)
+        torch.index_select(x1, 0, idx, out=tmp_x1)
+        torch.index_select(y1, 0, idx, out=tmp_y1)
+        torch.index_select(x2, 0, idx, out=tmp_x2)
+        torch.index_select(y2, 0, idx, out=tmp_y2)
 
         # すべてのBBoxに対して、現在のBBox=indexがiと被っている値までに設定(clamp)
         tmp_x1 = torch.clamp(tmp_x1, min=x1[i])
@@ -750,7 +746,7 @@ class Detect():
 
     def __init__(self, conf_thresh=0.01, top_k=200, nms_thresh=0.45):
         self.softmax = nn.Softmax(dim=-1)  # confをソフトマックス関数で正規化するために用意
-        #self.l2 = 
+        self.l2norm = F.normalize(p=2.0,dim=1)
         self.conf_thresh = conf_thresh  # confがconf_thresh=0.01より高いDBoxのみを扱う
         self.top_k = top_k  # nm_supressionでconfの高いtop_k個を計算に使用する, top_k = 200
         self.nms_thresh = nms_thresh  # nm_supressionでIOUがnms_thresh=0.45より大きいと、同一物体へのBBoxとみなす
@@ -784,7 +780,9 @@ class Detect():
 
         # confはソフトマックスを適用して正規化する
         conf_data = self.softmax(conf_data)
-        # lineはL2正規化を行う
+        
+        # lineはL2正規化を行う）
+        #line_data = self.l2norm(line_list)
 
         # 出力の型を作成する。テンソルサイズは[minibatch数, 21, 200, 5+32+3]
         output = torch.zeros(num_batch, num_classes, self.top_k, 5+32+4)
@@ -809,7 +807,7 @@ class Detect():
             
             #linesのコピーを作成
             decoded_lines = line_list[i].clone()
-            # decoded_lines[3,8732]
+            # decoded_lines[4,8732]
             
             # 画像クラスごとのループ（背景クラスのindexである0は計算せず、index=1から）
             for cl in range(1, num_classes):
@@ -837,7 +835,7 @@ class Detect():
                 # p_mask:torch.Size([8732,32])
                 
                 li_mask =c_mask.unsqueeze(1).expand_as(decoded_lines)
-                # li_mask:torch.Size([8732,32])
+                # li_mask:torch.Size([8732,4])
                 
                 # l_maskをdecoded_boxesに適応します
                 boxes = decoded_boxes[l_mask].view(-1, 4)
@@ -847,10 +845,11 @@ class Detect():
                 poses = decoded_poses[p_mask].view(-1,32)
                 
                 lines = decoded_lines[li_mask].view(-1,4)
-                
+
+                lines = self.l2norm(lines)
                 # 3. Non-Maximum Suppressionを実施し、被っているBBoxを取り除く
                 ids, count = nm_suppression(
-                    boxes.detach(), scores.detach(), self.nms_thresh, self.top_k)
+                    boxes, scores, self.nms_thresh, self.top_k)
                 # ids：confの降順にNon-Maximum Suppressionを通過したindexが格納
                 # count：Non-Maximum Suppressionを通過したBBoxの数
 
@@ -941,7 +940,7 @@ class SSD(nn.Module):
             i = i + 1
         for (ps,l1,l2) in zip(pose_sources,self.line_1,self.line_2):
             y = list()
-            y = l1(ps)
+            y = F.relu(l1(ps))
             line.append(l2(y).permute(0, 2, 3, 1).contiguous())
                 
         # さらにlocとconfの形を変形
@@ -966,7 +965,7 @@ class SSD(nn.Module):
         if self.phase == "inference":  # 推論時
             # クラス「Detect」のforwardを実行
             # 返り値のサイズは torch.Size([batch_num, 21, 200, 5])
-            return self.detect(output[0], output[1], output[2],output[3],output[4])
+            return self.detect(output[0], output[1], output[2],output[3])
 
         else:  # 学習時
             return output
@@ -1057,7 +1056,7 @@ class MultiBoxLoss(nn.Module):
             match(self.jaccard_thresh, truths, dbox,
                   variance, labels,ignore,loc_t, conf_t_label,ignore_t,idx)
                   
-            match2(self.jaccard_thresh+0.4, truths, dbox,
+            match2(self.jaccard_thresh+0.2, truths, dbox,
                   variance, labels,poses, ignore,conf_pt_label, pose_t,ignore_pt,idx)
 
         # ----------
@@ -1084,11 +1083,11 @@ class MultiBoxLoss(nn.Module):
         loc_p = loc_data[pos_idx].view(-1, 4)
         loc_t = loc_t[pos_idx].view(-1, 4)
         
-        #ig_idx = ig_mask.unsqueeze(ig_mask.dim()).expand_as(loc_p)
+        ig_idx = ig_mask.unsqueeze(ig_mask.dim()).expand_as(loc_p)
         
         #ignorekarakyousidata wosyutoku
-        #loc_p = loc_p[ig_mask].view(-1,4)
-        #loc_t = loc_t[ig_mask].view(-1,4)
+        loc_p = loc_p[ig_mask].view(-1,4)
+        loc_t = loc_t[ig_mask].view(-1,4)
         
         # 物体を発見したPositive DBoxのオフセット情報loc_tの損失（誤差）を計算
         loss_l = F.smooth_l1_loss(loc_p, loc_t, reduction='sum')
@@ -1113,7 +1112,7 @@ class MultiBoxLoss(nn.Module):
         pose_t = pose_t[ig_idx].view(-1, 4)
         
 
-        #loss_p = ((pose_p - pose_t)**2).sum()
+        loss_p = ((pose_p - pose_t)**2).sum()
         
         # ----------
         # 種類を出力
@@ -1211,9 +1210,9 @@ class MultiBoxLoss(nn.Module):
         # 物体を発見したBBoxの数N（全ミニバッチの合計）で損失を割り算
         N = num_pos.sum()
         N1 = len(ig_idx)
-        loss_l /= N
+        loss_l /= N1
         loss_c /= N
-        #loss_p /= N1
+        loss_p /= N1
         #loss_p /= N1
         # 記述子のトリプレットロスの実装
         
@@ -1267,8 +1266,8 @@ class MultiBoxLoss(nn.Module):
 
         loss_t = 0.0
         #print(a13[0])
-        for i in range(len(anc_line)):
-            loss_t += F.triplet_margin_loss(anc_line[i],pos_line[i],neg_line[i])
+        for (a,p,n) in zip(a13,p3,n3):
+            loss_t += F.triplet_margin_loss(line_p[a],line_p[p],line_p[n])
 
         if len(a13) == 0:
             loss_t = 0.0
@@ -1283,24 +1282,24 @@ class MultiBoxLoss(nn.Module):
             #if torch.dot(m,n) < 0:
                 #neg_pose_p[T] = -neg_pose_p[T]
             #T = T + 1
-        for i,name in enumerate(anc_pose_p):
-            if torch.dot(anc_pose_p[i],anc_pose_t[i]) < 0:
-                anc_pose_p[i] = -anc_pose_p[i]
-        for i,name in enumerate(pos_pose_p):
-            if torch.dot(pos_pose_p[i],pos_pose_t[i]) < 0:
-                pos_pose_p[i] = -pos_pose_p[i]
+        #for i,name in enumerate(anc_pose_p):
+            #if torch.dot(anc_pose_p[i],anc_pose_t[i]) < 0:
+                #anc_pose_p[i] = -anc_pose_p[i]
+        #for i,name in enumerate(pos_pose_p):
+            #if torch.dot(pos_pose_p[i],pos_pose_t[i]) < 0:
+                #pos_pose_p[i] = -pos_pose_p[i]
         #for i,name in enumerate(neg_pose_p):
             #if torch.dot(neg_pose_p[i],neg_pose_t[i]) < 0:
                 #neg_pose_p[i] = -neg_pose_p[i]
 
-        loss_p_a = ((anc_pose_p - anc_pose_t)**2).sum()
-        loss_p_p = ((pos_pose_p - pos_pose_t)**2).sum()
+        #loss_p_a = ((anc_pose_p - anc_pose_t)**2).sum()
+        #loss_p_p = ((pos_pose_p - pos_pose_t)**2).sum()
         #loss_p_n = ((neg_pose_p - neg_pose_t)**2).sum()
 
-        if len(a13)+len(p3) == 0:
-            loss_p = 0.0
-        else:
-            loss_p = (loss_p_a + loss_p_p) / (len(a13)+len(p3))
+        #if len(a13)+len(p3)+len(n3) == 0:
+            #loss_p = 0.0
+        #else:
+            #loss_p = (loss_p_a + loss_p_p + loss_p_n) / (len(a13)+len(p3)+len(n3))
 
         ploss = anc_line - pos_line
         
@@ -1323,8 +1322,8 @@ class MultiBoxLoss(nn.Module):
         else:
             Ldesk = Ldesk / len(a13)
 
-        loss_l = 0.0
-        loss_c = 0.0
+        #loss_l = 0.0
+        #loss_c = 0.0
         #loss_p = 0.0
         #Ldesk = 0.0
         return loss_l,loss_c,loss_p,Ldesk,loss_t
